@@ -155,3 +155,11 @@ not a meaningful workload, and no hosted third-party service is ever
 load-tested. Results are committed under `perf/results/` with machine spec,
 commit hash and machine load; misses are kept; laptop numbers are
 development observations.
+
+## Release and upkeep
+
+From the guide: publish a supported component matrix, artifact provenance,
+a vulnerability process and migration paths (B7); budget the maintenance
+of every adapter before adding another — an adapter without an owner, a
+pinned version and an advisory watch is not added; never promise an SLA
+without an operating team and evidence.
