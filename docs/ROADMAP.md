@@ -1,26 +1,39 @@
 # Roadmap
 
-Planning-stage: every milestone is **Planned** and starts only when the
-previous gate's evidence exists — one milestone per branch, merged when
-its proof is stored. The guide's four implementation steps map as:
-**1** integration case → B0 · **2** starter deployment → B1–B3 ·
-**3** operations → B5 · **4** external validation → B7. The performance
-and load plan is B6.
+**Parked (future horizon).** Every milestone is *Planned* and nothing
+starts until the maintainer unparks the project (README, P-1). When it
+starts, each milestone begins only when the previous gate's evidence
+exists — one milestone per branch, merged when its proof is stored. The
+guide's four implementation steps map as: **1** integration case → B0 ·
+**2** starter deployment → B1–B4 · **3** operations → B5 · **4** external
+validation → B7. The performance and load plan is B0 (first scenario) and
+B6 (full runs).
+
+**Status rule.** A status cell may say *Done* only when it names the tests
+and the evidence path that prove the gate. Anything else is *Planned*,
+*In progress* or *Blocked (P-n)*. Load evidence measured on a busy machine
+is a smoke observation, never capacity.
+
+Every milestone ships: regression tests; its failure drills and
+threat-model tests as automated tests in CI; a load scenario with
+thresholds for anything new that serves traffic; the log-capture test over
+its drills.
 
 | Milestone | Builds | Proves (gate) | Status |
 |---|---|---|---|
-| **B0 — integration case + scaffold** | Workspace, toolchain, gates, this doc set; the evidence memo choosing **one** recurring developer problem demonstrated by the workspace's existing projects | The pattern is chosen from observed need, not preference; reproducible repo; `scripts/check.sh` runs in CI | Planned |
-| **B1 — control plane core** | Control DB (desired/observed/operations/audit), project + environment lifecycle API, per-project principals, console shell, CLI skeleton | One API for console and CLI; admin actions audited; the desired/observed split visible in every status response | Planned |
-| **B2 — reconciled provisioning** | The operation/step model, the lease-claimed worker, the starter's adapters (PostgreSQL database + role, S3 scoped path, OIDC client), observed-state reporting, fault fixtures | The partial-provisioning drill: a mid-operation failure keeps the real resource IDs and reconciles or compensates — no duplicate resources on retry. This drill gates every later adapter | Planned |
-| **B3 — starter deployment** | Release manifests, the deploy operation, the container runtime adapter; the one application pattern end-to-end: create → provision → deploy → run | The starter actually runs; a recorded control-plane-down drill shows applications keep serving while management degrades honestly | Planned |
-| **B4 — jobs + diagnostics** | The one background job (engine per the open question), request/job history via an OpenTelemetry pipeline, diagnosis views in console + CLI | The observe→diagnose path works on real traffic; quotas hold below the dashboard in the noisy-neighbor fixture; any cache is proven disposable | Planned |
-| **B5 — operate** | Upgrade with version manifests + compatibility matrix, secret rotation, backup/restore/export — shipped as tested drills | A second developer runs upgrade, rotate, restore and export from docs alone; the interrupted-upgrade drill replays nothing blind — reconcile, then resume | Planned |
-| **B6 — load + isolation evidence** | `perf/` scenarios: time to useful deployment, control-API latency, idle footprint, upgrade disruption; ten projects under mixed reads/jobs with one noisy neighbor; the control-plane-stopped availability matrix | Committed results (machine + commit hash) with misses kept, not rerun; budgets hold at the enforcement layer under the noisy neighbor | Planned |
-| **B7 — external validation + ship gate** | Install/operate docs hardened by use; the supported component matrix, artifact provenance, the vulnerability process, migration paths | Three independent teams repeat the operations; the ship gate is met when integrations demonstrably save setup and recovery effort | Planned |
+| **B0 — evidence memo and spine** | The evidence memo (D-012): the recurring developer problem in existing projects, the identity question answered first (D-011), the starter-template alternative compared; the Cargo workspace; `platform-domain` operation and step state machine and resource naming (D-016); the control-DB operation log; the fault-injecting fake provider; `scripts/check.sh` and a CI job running it (fmt, clippy `-D warnings`, tests, architecture checks, `cargo deny`); the first k6 scenario (create and read operations against the fake provider) | The memo is accepted by the maintainer, or it recommends staying parked and the project stays parked; CI green from the first commit; **drill `partial-provision` against the fake provider** passes over 10,000 randomized fault schedules with zero duplicates; a 100,000-request smoke of the control-API scenario committed as the baseline | Blocked (P-1) |
+| **B1 — control plane core** | Control DB (desired, observed, operations, audit, secrets), project and environment lifecycle API, per-project principals, envelope encryption (D-015), console shell, CLI skeleton, the OpenAPI document and its drift check (D-023) | One API for console and CLI; the desired/observed split visible in every status response; T1, T5 and T6 tests pass (no provider credential in the API, append-only audit, re-authentication for destructive operations, write-only secrets) | Planned |
+| **B2 — reconciled provisioning** | The lease-claimed worker; the starter's adapters — PostgreSQL database and role, an S3-compatible bucket with enforced quotas, an OIDC realm and client (D-019); observed-state reporting; the egress guard | **`partial-provision` against the real adapters** (smaller count, reported separately) with zero duplicates; T2, T3 (database, storage and identity halves) and T7 tests pass; the real-provider count of 1,000 provision and deprovision cycles recorded; the OIDC provider's idle footprint measured. This drill gates every later adapter | Planned |
+| **B3 — starter deployment** | Release manifests with digest-pinned images, the deploy operation, the rootless container runtime adapter (D-020), per-project networks; the one application pattern end to end: create → provision → deploy → run | The starter runs; **drill `control-plane-down`** (failure case 3) passes and the availability matrix is committed; T3 (network half), T4 and T10 tests pass | Planned |
+| **B4 — jobs and diagnostics** | The one background job on the app's own database (D-021); the OTLP collector and diagnostics database (D-022); diagnosis views in console and CLI; quota enforcement per resource (D-017) | The observe → diagnose path works on a seeded failure; **drill `noisy-neighbor`** (failure case 2) passes on the enforcement counters | Planned |
+| **B5 — operate** | Upgrade with version manifests and a compatibility matrix, secret rotation, backup, restore and export — as tested drills | **Drill `interrupted-upgrade-restore`** (failure case 4) passes at all four points (D-027); T9 passes; a second developer runs upgrade, rotate, restore and export from the docs alone (P-3) | Planned |
+| **B6 — load and isolation evidence** | The full runs (D-018): 1,000,000 control-API requests against the fake providers; 1,000,000 app-facing requests across ten projects with one noisy neighbor; time to useful deployment, idle footprint, upgrade disruption | Results committed with machine, commit and machine load; misses kept, not rerun; budgets hold at the enforcement layer | Planned |
+| **B7 — external validation and ship gate** | Install and operate docs hardened by use; the supported component matrix, artifact provenance, the vulnerability process, migration paths; the baseline timing of the operations script by hand | The ship gate in `END_GOAL.md` (D-028): three independent teams complete the operations script with no founder intervention, faster than the baseline | Blocked (P-4) |
 
-## Later directions (each needs its own contract + evidence)
+## Later directions (each needs its own contract and evidence)
 
 Hosted multi-tenancy, metered billing, regions and stronger isolation
-(independently reviewed threat model first), the jsrt executor, native
-apps, additional adapters — and "safe AI workflows", which currently has
-no contract at all. Expand only from observed need.
+(an independently reviewed threat model first, P-5), the JavaScript runtime
+as an executor, native apps, additional adapters, optional adapters to
+other independent products through their public APIs, and "safe AI
+workflows", which has no contract at all. Expand only from observed need.
