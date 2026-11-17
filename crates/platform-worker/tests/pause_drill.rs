@@ -61,6 +61,7 @@ struct Outcome {
 
 /// Worker A (a 400 ms lease) pauses 1.5 s at `point`; worker B takes over and finishes.
 async fn race(db: &TestDb, point: Point, options: FakeOptions) -> Outcome {
+    let (logs, _capture) = platform_db::logcheck::capture();
     let project = ProjectId::parse("pause").unwrap();
     let desired = DesiredState {
         databases: vec![LogicalName::parse("main").unwrap()],
@@ -103,11 +104,12 @@ async fn race(db: &TestDb, point: Point, options: FakeOptions) -> Outcome {
     let a = a.await.unwrap();
     let view = platform_db::log::get(&db.pool, id).await.unwrap().unwrap();
     assert_eq!(view.status, "succeeded");
+    platform_db::logcheck::assert_no_leaks(&logs.text(), &[], "drill logs");
     Outcome { fake, plan, a }
 }
 
 /// Paused before the lease check: A refuses to call the provider at all (F4).
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[tokio::test]
 async fn a_worker_paused_past_its_lease_does_not_call_the_provider() {
     let db = TestDb::new().await;
     let out = race(
@@ -137,7 +139,7 @@ async fn a_worker_paused_past_its_lease_does_not_call_the_provider() {
 /// Paused after the lease check, before the create is sent (D-029's residual window): A's
 /// stale create reaches the provider after B finished. A provider that de-duplicates by
 /// idempotency key returns B's resource instead of making a second one.
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[tokio::test]
 async fn a_stale_create_in_the_residual_window_is_deduplicated_by_its_key() {
     let db = TestDb::new().await;
     let options = FakeOptions {

@@ -16,6 +16,8 @@ pub mod desired;
 pub mod error;
 pub mod guard;
 pub mod log;
+#[cfg(feature = "test-support")]
+pub mod logcheck;
 pub mod pool;
 mod rows;
 #[cfg(feature = "test-support")]

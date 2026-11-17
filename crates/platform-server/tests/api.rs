@@ -304,3 +304,64 @@ async fn a_dead_control_database_is_reported_honestly() {
         started.elapsed()
     );
 }
+
+/// No secret reaches the server's logs (D-015, F11): the admin token, database passwords
+/// and credential-shaped URLs, across success, refusal and a dead database.
+#[tokio::test]
+async fn no_secret_reaches_the_server_logs() {
+    let (logs, _capture) = platform_db::logcheck::capture();
+    let db = TestDb::new().await;
+    let r = router(&db);
+    let _ = call(
+        &r,
+        "PUT",
+        "/v1/projects/shop/desired",
+        Some(starter()),
+        &[("idempotency-key", "k-1")],
+    )
+    .await;
+    let _ = call(
+        &r,
+        "PUT",
+        "/v1/projects/shop/desired",
+        Some(json!({"cache": 1})),
+        &[],
+    )
+    .await;
+    let _ = call(&r, "GET", "/v1/projects/shop", None, &[]).await;
+    let wrong = r
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/v1/operation-counts")
+                .header(
+                    header::AUTHORIZATION,
+                    "Bearer wrong-token-wrong-token-wrong-token",
+                )
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(wrong.status(), StatusCode::UNAUTHORIZED);
+    let settings = platform_db::PoolSettings {
+        acquire_timeout: Duration::from_millis(300),
+        ..platform_db::PoolSettings::default()
+    };
+    let dead = platform_db::connect_lazy(
+        "postgres://platform:hunter2-secret@127.0.0.1:1/platform",
+        &settings,
+    )
+    .unwrap();
+    let config = config();
+    let dead_router = app(&config, AppState::new(&config, dead));
+    let (status, _, _) = call(&dead_router, "GET", "/v1/projects/shop", None, &[]).await;
+    assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+    let text = logs.text();
+    assert!(
+        text.contains("control database unavailable"),
+        "the capture saw the server's logs"
+    );
+    platform_db::logcheck::assert_no_leaks(&text, &[TOKEN, "hunter2-secret", "k-1"], "server logs");
+    db.cleanup().await;
+}

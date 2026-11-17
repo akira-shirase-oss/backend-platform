@@ -117,6 +117,19 @@ starting values; changing one needs a measurement and a new entry.
   every drill fails on known secret shapes. Workloads receive secrets as
   files at start. Rotation is a B5 drill. Cost: losing the key file loses
   every secret, so its backup is part of the restore drill.
+
+  **The log-capture test exists since B0's review (F11):**
+  `platform_db::logcheck` captures `tracing` output at TRACE, sqlx
+  included, and fails on the admin token, the role passwords, a test's own
+  secrets or any `scheme://user:password@` URL. It runs over:
+  - the server API tests (success, refusal, a dead database);
+  - the in-process drill in every provider mode;
+  - the pause drill;
+  - every kill-drill worker's stderr at debug level.
+
+  On its first run it caught `bootstrap` writing both role passwords to the
+  log through sqlx's statement logging (DEBUG, or WARN for a statement
+  slower than a second). That connection now logs no statements.
 - **D-016 — Provider resource names are deterministic.** Each provisioned
   resource is named from the project ID and the resource's logical name
   (for example `p_<project>_<name>` for a database), and tagged with the

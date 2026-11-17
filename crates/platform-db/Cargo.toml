@@ -9,7 +9,7 @@ publish.workspace = true
 
 [features]
 # TestDb: one throwaway database per test, created from BP_TEST_DATABASE_URL.
-test-support = []
+test-support = ["dep:tracing-subscriber"]
 
 [[bin]]
 name = "platform-dbctl"
@@ -26,6 +26,7 @@ time.workspace = true
 tracing.workspace = true
 uuid.workspace = true
 tokio.workspace = true
+tracing-subscriber = { workspace = true, optional = true }
 
 [dev-dependencies]
 platform-db = { path = ".", features = ["test-support"] }

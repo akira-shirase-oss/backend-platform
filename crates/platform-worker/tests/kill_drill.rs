@@ -28,6 +28,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use common::check;
+use platform_db::logcheck::{Captured, assert_no_leaks};
 use platform_db::testing::TestDb;
 use platform_domain::{
     DesiredState, IdentitySpec, LogicalName, OperationId, Plan, ProjectId, ResourceKind,
@@ -49,6 +50,8 @@ struct Case {
     plan: Plan,
     operation: OperationId,
     server: tokio::task::JoinHandle<()>,
+    /// Every worker's stderr, at debug level: the log-capture check reads it (F11).
+    logs: Captured,
 }
 
 impl Case {
@@ -95,6 +98,7 @@ impl Case {
             plan,
             operation,
             server,
+            logs: Captured::default(),
         }
     }
 
@@ -110,7 +114,7 @@ impl Case {
             .env("BP_BACKOFF_BASE_MS", "10")
             .env("BP_BACKOFF_CAP_MS", "50")
             .env("BP_POLL_MAX_MS", "50")
-            .env("BP_LOG", "warn")
+            .env("BP_LOG", "debug")
             .env_remove("BP_HALT_AT")
             .stdin(Stdio::null())
             .stdout(Stdio::null())
@@ -119,7 +123,17 @@ impl Case {
         if let Some(halt_at) = halt_at {
             command.env("BP_HALT_AT", halt_at);
         }
-        command.spawn().expect("spawning platform-worker")
+        let mut child = command.spawn().expect("spawning platform-worker");
+        // Drain stderr into the capture, always: a full pipe would block the worker.
+        let stderr = child.stderr.take().expect("invariant: stderr is piped");
+        let logs = self.logs.clone();
+        tokio::spawn(async move {
+            let mut lines = BufReader::new(stderr).lines();
+            while let Ok(Some(line)) = lines.next_line().await {
+                logs.push(&line);
+            }
+        });
+        child
     }
 
     async fn status(&self) -> platform_db::OperationSummary {
@@ -175,26 +189,28 @@ impl Case {
 
     async fn finish(self) {
         self.server.abort();
+        // The workers were given database URLs with passwords: none may reach a log line.
+        assert_no_leaks(&self.logs.text(), &[], "worker logs");
         self.db.cleanup().await;
     }
 }
 
-async fn wait_for_halt(child: &mut Child, label: &str) -> String {
-    let stderr = child.stderr.take().unwrap();
-    let mut lines = BufReader::new(stderr).lines();
-    let found = tokio::time::timeout(Duration::from_secs(30), async {
-        while let Some(line) = lines.next_line().await.unwrap() {
-            if line.contains("bp-worker halted at") {
-                return line;
-            }
+async fn wait_for_halt(logs: &Captured, label: &str) -> String {
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
+    loop {
+        if let Some(line) = logs
+            .text()
+            .lines()
+            .find(|l| l.contains("bp-worker halted at"))
+        {
+            return line.to_owned();
         }
-        panic!("{label}: worker exited without halting");
-    })
-    .await
-    .unwrap_or_else(|_| panic!("{label}: worker never reached the halt point"));
-    // Keep draining so the parked process can never block on a full pipe.
-    tokio::spawn(async move { while let Ok(Some(_)) = lines.next_line().await {} });
-    found
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "{label}: worker never reached the halt point"
+        );
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
 }
 
 async fn sigkill(mut child: Child, label: &str) {
@@ -210,8 +226,8 @@ async fn sigkill(mut child: Child, label: &str) {
 async fn kill_case(point: &'static str, position: u16) -> String {
     let label = format!("kill -9 at {point}:{position}");
     let case = Case::new(FaultConfig::default()).await;
-    let mut first = case.worker(Some(&format!("{point}:{position}")));
-    let halted = wait_for_halt(&mut first, &label).await;
+    let first = case.worker(Some(&format!("{point}:{position}")));
+    let halted = wait_for_halt(&case.logs, &label).await;
     // While parked, the operation shows exactly where it is: never fabricated success.
     let before = case.status().await;
     if point != "after-finish" {

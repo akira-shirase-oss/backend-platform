@@ -53,8 +53,11 @@ pub async fn bootstrap(
             "role passwords must be 8 to 128 of [A-Za-z0-9_-]".to_owned(),
         ));
     }
+    // The `ALTER ROLE ... PASSWORD` statements carry both passwords: sqlx logs statements
+    // at DEBUG, and any slower than a second at WARN, so this connection logs none (F11).
     let mut admin = PgConnectOptions::from_str(admin_url)
         .map_err(DbError::Other)?
+        .disable_statement_logging()
         .connect()
         .await?;
     admin

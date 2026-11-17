@@ -340,6 +340,7 @@ fn record(
 }
 
 async fn run_mode(mode: Mode) -> Totals {
+    let (logs, _capture) = platform_db::logcheck::capture();
     let mut totals = Totals {
         mode: Some(mode),
         ..Totals::default()
@@ -373,6 +374,7 @@ async fn run_mode(mode: Mode) -> Totals {
     );
     assert_eq!(totals.schedules, SCHEDULES);
     assert_eq!(totals.silent_duplicates, 0, "{totals:?}");
+    platform_db::logcheck::assert_no_leaks(&logs.text(), &[], "drill logs");
     // The schedules must actually have exercised the dangerous paths.
     assert!(totals.provider_faults_injected > SCHEDULES, "{totals:?}");
     assert!(totals.late_effects_injected > 1_000, "{totals:?}");
