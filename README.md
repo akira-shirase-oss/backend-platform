@@ -4,18 +4,21 @@
 > items owed.** The maintainer asked on 2026-11-16 for development to start
 > on every planned project, so B0 was built:
 >
-> - the evidence memo (`docs/B0_MEMO.md`), which **recommends staying
->   parked** and meeting the need with a copyable starter template;
+> - the evidence memo (`docs/B0_MEMO.md`);
 > - the engineering spine, with CI;
 > - the partial-provisioning drill;
 > - the first load scenario.
 >
-> Still owed: a quiet-machine run of the 100,000-request baseline and the
-> 1,000,000-request run (both smokes so far ran on a busy laptop and missed
-> their thresholds; they are kept), and the maintainer's decision on the
-> memo (P-2). Nothing past B0 starts until the maintainer unparks the
-> project (P-1). The guide marks this an expansion horizon, not an approved
-> simultaneous build or a commercial offering.
+> The memo's recommendation (stay parked, and build a copyable starter
+> template instead of a control plane) was **accepted with corrections on
+> 2026-11-16** (D-036). The next milestone is **B1-T, the starter
+> template** (`docs/STARTER_TEMPLATE.md`), planned; the control-plane
+> milestones B1–B7 do not start until the maintainer unparks the project
+> (P-1). Still owed for B0: a quiet-machine run of the 100,000-request
+> baseline and the 1,000,000-request run. Both smokes so far ran on a busy
+> laptop and missed their thresholds; both are kept. The guide marks this
+> an expansion horizon, not an approved simultaneous build or a commercial
+> offering.
 
 A self-hosted backend platform in the Appwrite/Supabase direction — one
 developer experience over deployment, identity, data, files, jobs and
@@ -34,8 +37,8 @@ platform provisions belongs to one project at a time.
 
 | # | Needed | From | Blocks |
 |---|---|---|---|
-| P-1 | The decision to unpark the project (B0 alone was started, at the maintainer's request, on 2026-11-16) | the maintainer | B1 and everything after it |
-| P-2 | Acceptance of the B0 memo, which recommends staying parked and building a starter template instead (D-012, D-033) | the maintainer | B1 |
+| P-1 | The decision to unpark the project (B0 alone was started, at the maintainer's request, on 2026-11-16) | the maintainer | the control-plane milestones B1–B7 |
+| P-2 | Resolved 2026-11-16: the B0 memo was accepted with corrections (D-036) | — | nothing |
 | P-3 | A second developer who has not worked on the platform | the maintainer, then that person | the B5 gate |
 | P-4 | Three independent teams to run the operations script (D-028) | outside parties | the B7 ship gate |
 | P-5 | An independently reviewed threat model for hostile multi-tenant workloads | an outside reviewer | any shared-hosting direction (not the first release) |
@@ -65,16 +68,18 @@ MODE=smoke scripts/load.sh     # the 100,000-request baseline (MODE=full: 1,000,
 
 - `docs/B0_MEMO.md` — starter template or running control plane? The
   evidence, the threat-surface comparison, verified component versions and
-  the recommendation (stay parked)
+  the recommendation (stay parked), accepted with corrections (D-036)
+- `docs/STARTER_TEMPLATE.md` — the next milestone, B1-T: what the
+  copy-and-own starter template contains and its acceptance test
 - `docs/END_GOAL.md` — what done means, scope, invariants, the four
   required failure cases with their drills and pass conditions, the ship
   gate in testable form
 - `docs/ARCHITECTURE.md` — sources of truth, components, paths,
   consistency, and the control-plane threat model
-- `docs/ROADMAP.md` — B0–B7 with per-milestone proof gates
+- `docs/ROADMAP.md` — B0, B1-T and B1–B7 with per-milestone proof gates
 - `docs/DECISIONS.md` — the guide-seeded trade-offs (D-001–D-010), the
-  decisions made before code (D-011–D-028), those made in B0 (D-029–D-033)
-  and the questions still open
+  decisions made before code (D-011–D-028), those made in B0 and its review
+  round (D-029 onward) and the questions still open
 - `AGENTS.md` — project rules on top of the workspace rules
 
 Contract: the engineering guide `09_Backend_Platform.docx` (kept in the

@@ -306,8 +306,9 @@ starting values; changing one needs a measurement and a new entry.
   a copyable starter template, outside this repository, meets the
   operations need of the reference workloads with nothing new to run, and
   the slice they repeat most is the one D-011 keeps a platform from
-  supplying. The memo lists what would change the answer. It awaits the
-  maintainer's acceptance (P-2).
+  supplying. The memo lists what would change the answer. Accepted with
+  corrections on 2026-11-16 (D-036), which also moves the template into
+  this repository.
 
 - **D-034 — Three database roles; the runtime role cannot rewrite the log.**
   - An administrator creates two roles and the database
@@ -362,6 +363,34 @@ starting values; changing one needs a measurement and a new entry.
   made is reported, and none is ever behind a `succeeded`. Cost: one more
   lookup per create.
 
+- **D-036 — The B0 memo is accepted with corrections; the next milestone is
+  the starter template (B1-T).** On 2026-11-16 the coordinator, acting on
+  the maintainer's delegation, accepted the memo's recommendation: stay
+  parked, and meet the need with a copyable starter template. The
+  acceptance is subject to an independent review's corrections, all now
+  made in `docs/B0_MEMO.md`:
+  - the copy-and-own accounts kit goes back into the template (D-011
+    forbids a shared login service, not copied code);
+  - the products are planned for droplets, not running there;
+  - the smoke figures are scenario-only, with every missed threshold
+    listed;
+  - the operations-line count describes duplication honestly;
+  - the steelman adds a run-to-completion reconciler CLI and adopting
+    Kamal or Coolify;
+  - the T2 row and the threat count are corrected;
+  - the drill's "0 duplicates" is scoped to providers with unique names or
+    idempotency keys (D-035).
+
+  P-2 is resolved. The project stays parked, and the control-plane
+  milestones B1–B7 do not start. B1-T (`docs/STARTER_TEMPLATE.md`) is
+  planned in this repository under `template/`, copied and owned by each
+  product; no product depends on this repository (this replaces D-033's
+  "outside this repository", because the template's CI and evidence kit is
+  this repository's). Its acceptance is Durable Runner adopting the
+  template on a fresh droplet faster than a timed hand baseline. Cost: the
+  B0 reconciler stays a tested record, not a product. Reopening it follows
+  memo §7.
+
 ## Open questions (still open)
 
 These need the maintainer or an outside party; each is in the README's
@@ -369,9 +398,6 @@ These need the maintainer or an outside party; each is in the README's
 
 - **Unparking (P-1)** — whether and when the project starts; the guide calls
   it a future horizon.
-- **The application pattern and the template-versus-platform answer
-  (P-2)** — the B0 memo proposes; the maintainer accepts or keeps it parked
-  (D-012).
 - **People (P-3, P-4)** — a second developer for B5 and three independent
   teams for B7.
 - **Hostile multi-tenancy (P-5)** — an independent threat-model review

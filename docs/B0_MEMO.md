@@ -3,7 +3,7 @@
 Written 2026-11-16 for the maintainer's decision (README P-2, D-012). It
 answers the identity question first (D-011), describes what one small
 organization actually needs to run its small apps, measured against the
-portfolio's own products, and then compares two ways to meet that need. It
+portfolio's own products, and then compares the ways to meet that need. It
 ends with a recommendation, marked as such, and the conditions that would
 change it.
 
@@ -11,36 +11,52 @@ Facts are dated. Component versions were read from each project's official
 source on 2026-11-16 (§6). Measurements come from this repository's B0 spine
 and carry the commit and machine load (§5). Anything not measured says so.
 
+**Decision (2026-11-16):** the recommendation was accepted with corrections
+by the coordinator, acting on the maintainer's delegation (D-036). An
+independent review corrected this memo in seven places: the accounts
+slice, deployed versus planned, the operations-line count, the smoke
+figures, the steelman, the threat count, and the drill's "0 duplicates"
+claim (§5). Those corrections are made below. The next
+milestone is the starter template, B1-T (`docs/STARTER_TEMPLATE.md`).
+
 ## 1. The identity question, answered first
 
-**The platform cannot remove the work the products repeat most.** Each
-product's `docs/SAAS_PLAN.md` (written 2026-11-13) lists the same gap rows
-between "my tool" and "SaaS": accounts, invite-gated sign-up, email
-verification, workspaces, members and roles, per-workspace tokens or API
-keys, plan limits, onboarding and account lifecycle. That slice is the
-recurring developer problem D-012 names. D-011 forbids the platform from
-supplying it, because a shared login would make all three products depend
-on one service: the guide's dependency trap. The products are independent
-by the maintainer's decision of 2026-11-13. The platform could provision
-identity *per project* (one OIDC realm each), but:
+The work the products repeat most is accounts. Each product's
+`docs/SAAS_PLAN.md` (written 2026-11-13) lists the same gap rows between
+"my tool" and "SaaS": accounts, invite-gated sign-up, email verification,
+workspaces, members and roles, per-workspace tokens or API keys, plan
+limits, onboarding and account lifecycle. That slice is the recurring
+developer problem D-012 names.
 
-- Colophon keeps Keycloak off its droplet for memory reasons and runs
-  password accounts only for the beta (Colophon `SAAS_PLAN.md`, "Keycloak");
+**D-011 forbids a shared login *service*, not shared *code*.** A platform
+that ran the products' identity would make all three depend on it: the
+guide's dependency trap. But a copy-and-own accounts kit does not. Each
+product copies the code once, runs it against its own database, and owns
+it from then on, as it already owns its copy of `@colophon/ui`. So the
+starter-template option (a) includes an accounts kit (§3). The slice the
+products repeat most is addressed by the template, and not by a platform.
+
+The platform's own identity offer is one OIDC realm per project, and it
+has no consumer among the reference workloads:
+
+- Colophon keeps Keycloak off its planned droplet for memory reasons and
+  plans password accounts only for the beta (Colophon `SAAS_PLAN.md`,
+  "Keycloak");
 - Service Monitor and Durable Runner plan their own accounts on Neon.
-
-So the identity half of the platform has no consumer among the reference
-workloads. What remains to compare is the *operations* slice: deploy, data,
-files, jobs, diagnostics, backups, upgrades and restore.
 
 ## 2. What the reference workloads actually need
 
 The three products stay independent (D-011). They are measured here as
-workloads, not proposed as tenants.
+workloads, not proposed as tenants. **None of them is deployed yet.** All
+three plans say "plan, not built … Nothing here is deployed yet". The host
+column below is the 2026-11-13 decision, not something observed: no
+product has a Caddyfile, Service Monitor has the only systemd unit, and
+Colophon's planned `deploy/droplet/` does not exist.
 
 | | Colophon | Service Monitor | Durable Runner |
 |---|---|---|---|
 | Process | one Rust binary (API + Studio + worker loop) | one Rust binary + static status page | one Rust binary (API + dashboard + engine) |
-| Host | one 2 GB droplet, Caddy → systemd | its own 2 GB droplet (observes the others from outside) | one 2 GB droplet, Caddy → systemd |
+| Host (planned) | one 2 GB droplet, Caddy → systemd | its own 2 GB droplet (observes the others from outside) | one 2 GB droplet, Caddy → systemd |
 | Durable data | Neon Postgres (LISTEN/NOTIFY, advisory locks, `SKIP LOCKED`) | SQLite on the droplet (evidence) + Neon (accounts) | append-only journal on a volume (the authority) + Neon (accounts) |
 | Files | S3 API: Spaces or R2 planned; Garage only in the dev stack | none | none |
 | Cache | Valkey (capped) for quotas | none | none |
@@ -50,39 +66,89 @@ workloads, not proposed as tenants.
 Sources: each product's `docs/SAAS_PLAN.md`; `products/colophon/deploy/compose.yaml`;
 `products/service-monitor/deploy/`.
 
-What they repeat, measured as artifacts that already exist per product:
+Operations material that exists today, counted on 2026-11-16:
 
-- Colophon: `backup.sh` (719 lines), `restore.sh` (733), `upgrade-rehearsal.sh` (178),
-  `install.sh` (154), `failover.sh` (110), `backup-crypt.sh` (74), plus runbooks for
-  backup, restore, upgrade, observability and install (594 lines).
-- Service Monitor: `backup-drill.sh` (85), `deploy.sh` (80), `RUNBOOK.md` (162),
-  a hardened `monitor-server.service` (60).
-- Durable Runner: `docs/OPERATING.md` and its backup and restore endpoints.
+- Colophon:
+  - scripts: `backup.sh` (719 lines), `restore.sh` (733),
+    `upgrade-rehearsal.sh` (178), `install.sh` (154), `failover.sh` (110),
+    `backup-crypt.sh` (74);
+  - runbooks: backup, restore, upgrade, observability, install (594 lines).
 
-None of them needs a database, a bucket or a realm *provisioned on demand*.
-Each needs the same handful of operating chores done well, once per product:
-TLS and a reverse proxy, a hardened service unit, an environment and secrets
-file, backups with a restore drill, an upgrade procedure with a rehearsal,
-health and readiness endpoints, and logs. The managed services (Neon, Spaces
-or R2) already provide the durable data and files.
+  About 1,500 of these lines (`backup.sh`, `restore.sh`, `backup-crypt.sh`)
+  are base-backup, WAL and `age` logic built on `pg_basebackup`, which
+  Colophon's own plan says "cannot run against Neon".
+- Service Monitor: `backup-drill.sh` (85), `deploy.sh` (80), `RUNBOOK.md`
+  (162), and a hardened `monitor-server.service` (60).
+- Durable Runner: `docs/OPERATING.md` (249 lines) and its backup and
+  restore endpoints.
 
-## 3. The two options
+That is about 3,200 lines of operations material. Much of it is not
+duplication: it is product-specific, or aimed at a database the plans have
+moved away from. The slice that would repeat is still mostly unwritten:
+proxy, service unit, environment and secrets file, deploy and rollback,
+health contract, and restore drills for Neon, SQLite and the journal. The
+template would standardize those parts before three products write them
+three times.
+
+None of the products needs a database, a bucket or a realm *provisioned on
+demand*. Each needs the same operating chores done well once:
+- TLS and a reverse proxy;
+- a hardened service unit;
+- an environment and secrets file;
+- backups with a restore drill;
+- an upgrade procedure with a rehearsal;
+- health and readiness endpoints;
+- logs.
+
+Plus the accounts slice of §1. The planned managed services (Neon; Spaces
+or R2) provide the durable data and files.
+
+## 3. The options
 
 **(a) A copyable starter template.** A directory that each product copies
-and then owns, the same copy model the products already use for
-`@colophon/ui`. It holds a Caddyfile; hardened systemd units; an environment
-template with secret-file conventions (mode 0600, never in logs); backup,
-restore and upgrade scripts, each with its drill; a health and readiness
-contract; and the CI and load harness this repository now has (pinned
-toolchain, `check.sh`, `cargo deny`, SHA-pinned actions, a k6 runner that
-records machine and commit). Nothing runs that the product does not already
-run.
+and then owns. It contains:
+- **a copy-and-own accounts kit:** sign-up, verification, sessions,
+  workspaces, roles, tokens and limits, running on the product's own
+  database;
+- a Caddyfile;
+- hardened systemd units;
+- an environment template with secret-file conventions (mode 0600, never
+  in logs);
+- backup, restore and upgrade scripts, each with its drill;
+- a health and readiness contract;
+- the CI and load harness this repository now has.
 
-**(b) A running control plane.** What `ARCHITECTURE.md` describes: a control
-database, an API, a reconciler worker holding provider admin credentials,
-adapters for PostgreSQL, the object store, the OIDC provider and the
-container runtime, a console, a CLI, an OTLP collector and a diagnostics
-database. It is assembled from proven components, but someone has to run it.
+Nothing runs that the product does not already run. Its full contents are
+`docs/STARTER_TEMPLATE.md`.
+
+**(b) A running control plane.** What `ARCHITECTURE.md` describes: a
+control database, an API, a reconciler worker holding provider admin
+credentials, adapters for PostgreSQL, the object store, the OIDC provider
+and the container runtime, a console, a CLI, an OTLP collector and a
+diagnostics database. It is assembled from proven components, but someone
+has to run it.
+
+**(c) A run-to-completion reconciler CLI.** The steelman of (b). It is B0's
+spine without the daemon: `platform apply plan.toml` takes a lock, runs
+the plan's steps through the adapters, reconciles, records the outcome and
+exits. There is no API, no console and no long-running process, so T1 and
+T10 do not exist. The credentials live where the operator runs it (laptop
+or CI), exactly as today. It reuses everything B0 built, including the
+partial-provisioning drill. What it lacks against (b): continuous drift
+detection and a status view between runs. What it lacks against (a): it
+still needs real adapters (B2) and their upkeep. It also provisions
+resources the products do not currently need provisioned.
+
+**(d) Adopt an existing tool.** Kamal (template shape: deploy scripts over
+SSH and Docker, no server-side control plane) or Coolify (platform shape: a
+self-hosted PaaS). Either would cover deploy and restart, without the
+accounts kit, the restore drills for Neon, SQLite and the journal, or the
+evidence kit. The products are single Rust binaries under systemd, and
+neither tool covers that natively; both are built around containers.
+Kamal has had no release since 2026-06-18, so adopting it would mean
+owning its upkeep. Coolify (v4.7.5, 2026-11-10) is itself a control plane
+to run (T1, T2, T10). Either one also adds a container runtime to every
+droplet, which the products do not have today.
 
 ## 4. Comparison
 
@@ -92,14 +158,16 @@ database. It is assembled from proven components, but someone has to run it.
 |---|---|---|
 | New runtime components | none | control DB, API, worker, console; plus Keycloak, an object store, Podman and an OTel Collector if self-hosted |
 | In the app's request path | nothing new | nothing by design (invariant 3); proving it is the `control-plane-down` drill, owed at B3 |
-| Provisioning failure modes | none: resources are created once, by hand or by the provider's console | partial provisioning, lost replies, crashed workers. B0 proves convergence against the **fake** provider only; the real adapters are B2 |
+| Provisioning failure modes | none: resources are created once, by hand or by the provider's console | partial provisioning, lost replies, crashed or paused workers, late creates. B0 drills them against the **fake** provider only; the real adapters are B2 |
 | Overload behaviour | each product's own | the control API sheds with 503/429 instead of hanging (seen in the B0 smoke, §5); still one more thing to size |
 
 ### Upgrade and restore drills
 
 - **Template:** one upgrade drill and one restore drill per product, for that
-  product's own data. Colophon and Service Monitor already have both; the
-  template standardizes them.
+  product's own data. Some exist: Colophon's upgrade rehearsal and its
+  restore script (aimed at self-hosted PostgreSQL, not Neon), Service
+  Monitor's backup drill, Durable Runner's restore drill. The template
+  standardizes them and adds the missing ones (§2).
 - **Control plane:** every product's drills stay, **and** the platform's own
   are added. Failure case 4 (D-027) has four interruption points, and a
   restore must reconcile observed state before any job resumes. That is more
@@ -108,21 +176,24 @@ database. It is assembled from proven components, but someone has to run it.
 
 ### Security surface (threat model T1–T10, `ARCHITECTURE.md`)
 
-| # | Threat | With the template | With the control plane |
-|---|---|---|---|
-| T1 | compromised console/API reaches every project | does not exist: there is no central API | exists; mitigated by the API/worker split (CI-checked since B0) |
-| T2 | compromised worker holds the keys | does not exist: no process holds admin credentials over other products | exists: the crown jewel |
-| T3 | cross-project access | separated by default: separate droplets, Neon projects, buckets | must be enforced by roles, keys, realms and networks on a shared host |
-| T4 | container escape | no shared container host | rootless Podman on a shared host |
-| T5 | admin abuse, repudiation | provider audit logs (DigitalOcean, Neon) | an append-only audit to build and protect |
-| T6 | secret disclosure | per-droplet secret files, blast radius of one product | envelope encryption and a KEK whose loss loses every secret |
-| T7 | SSRF via user URLs | not in a control path (Service Monitor already guards its own egress) | an egress guard to build |
-| T8 | supply chain | Caddy + the product | + PostgreSQL server, Keycloak (JVM), object store, Podman, OTel Collector |
-| T9 | backup theft, malicious restore | per product | central backups: one prize, one restore path for everything |
-| T10 | control-plane DoS | does not exist | exists |
+| # | Threat | Template (a) | Reconciler CLI (c) | Control plane (b) |
+|---|---|---|---|---|
+| T1 | compromised console/API reaches every project | does not exist: no central API | does not exist | exists; mitigated by the API/worker split (CI-checked, all features and targets) |
+| T2 | compromised holder of admin credentials | as a process, does not exist. The admin power **moves to the operator's credentials, as today**: the DigitalOcean, Neon and Cloudflare tokens on a laptop or in CI already hold admin over every product | the same operator credentials, now also used by the CLI | exists as a process (the worker): the crown jewel, in addition to the operator's |
+| T3 | cross-project access | separate droplets, Neon projects and buckets, but still a provider and product concern (a shared token or a mis-scoped key crosses projects) | the same | must be enforced by roles, keys, realms and networks on a shared host |
+| T4 | container escape | no shared container host | none (no runtime) | rootless Podman on a shared host |
+| T5 | admin abuse, repudiation | provider audit logs (DigitalOcean, Neon), still to be watched | the same, plus the CLI's own records | an append-only audit to build and protect (D-034's roles are the start) |
+| T6 | secret disclosure | per-droplet secret files, blast radius of one product | per-run secrets, operator-held | envelope encryption and a KEK whose loss loses every secret |
+| T7 | SSRF via user URLs | a product concern (Service Monitor already guards its own egress) | none | an egress guard to build |
+| T8 | supply chain | Caddy and the product | plus the adapters' clients | plus PostgreSQL server, Keycloak (JVM), object store, Podman and OTel Collector |
+| T9 | backup theft, malicious restore | per product | per product | central backups: one prize, one restore path for everything |
+| T10 | control-plane DoS | does not exist | does not exist | exists |
 
-The template leaves 3 of the 10 threats (T6, T8, T9), each with a
-one-product blast radius. The control plane carries all ten.
+The template **eliminates T1, T2 as a process, T4 and T10**. T3, T5 and T7
+persist, as provider and product concerns. T6, T8 and T9 persist per
+product, each with a one-product blast radius. The reconciler CLI
+eliminates T1, T4 (no runtime) and T10. The control plane carries all ten,
+plus the operator's credentials.
 
 ### Operating effort
 
@@ -130,23 +201,26 @@ Neither option's effort has been timed. The honest measure is the D-028
 baseline (the operations script done by hand), and nobody has run it yet.
 What can be counted:
 
-- **Template:** the products already carry about 2,950 lines of operations
-  scripts, units and runbooks (§2: Colophon about 2,560, Service Monitor 387). A template would replace the duplicated parts
-  with one maintained copy per product. It adds no service to patch.
-- **Control plane:** B0's spine alone is about 5,600 lines of Rust (unit
-  tests included) plus about 1,460 lines of integration tests and drills,
-  and it provisions nothing real yet. Running it adds the
+- **Template:** about 3,200 lines of operations material exist (§2), but
+  most of what would repeat is not yet written. The template writes it once
+  for every product to copy, and adds no service to patch. The accounts kit
+  is the largest piece; it comes from Colophon's module 03.
+- **Control plane:** B0's spine alone, after the review round, is about
+  6,400 lines of Rust (unit tests included) plus about 2,650 lines of
+  integration tests and drills (counted 2026-11-16), and it provisions
+  nothing real yet. Running it adds the
   upkeep of every adapter. The guide says to budget an adapter's maintenance
   before adding it: an owner, a pinned version and an advisory watch. The
   OTel Collector is still 0.x, with a release about every two weeks;
   Keycloak is a JVM service with its own advisories to track.
-- **Memory:** each product has a 2 GB droplet. The two products in this
-  space publish self-hosting minimums above that before any app runs:
+- **Memory:** each product is planned for a 2 GB droplet. The two products
+  in this space publish self-hosting minimums above that before any app
+  runs:
   - Supabase: 4 GB RAM, 2 cores, 40 GB SSD.
   - Appwrite: 4 GB RAM, 2 cores, 2 GB swap.
 
-  Colophon already left Keycloak off its droplet for memory. The control
-  plane's idle footprint is unmeasured (a B2 gate).
+  Colophon's plan already leaves Keycloak off its droplet for memory. The
+  control plane's idle footprint is unmeasured (a B2 gate).
 
 ### Proven components each would use (verified 2026-11-16, §6)
 
@@ -155,7 +229,9 @@ What can be counted:
   - The products' managed services (Neon; Spaces or R2).
   - For self-hosters: PostgreSQL 18.7 and Garage v2.5.0.
   - k6 for load.
-  - PostgreSQL's own `pg_dump`/`pg_basebackup` for backups.
+  - For backups: Neon's point-in-time restore and branches (`pg_basebackup`
+    cannot run against Neon), SQLite's `VACUUM INTO`, the journal's own
+    snapshot, and `pg_dump` for self-hosters.
 - **Control plane:** everything the template uses, plus:
   - PostgreSQL 18.7 as the control DB and the provisioned databases.
   - Keycloak 26.8.2.
@@ -170,62 +246,90 @@ What can be counted:
 The spine was built regardless of the verdict, because CI comes first. It
 shows that the platform's hardest property is achievable, and at what cost.
 
-- **Drill `partial-provision`, in process:** 10,000 randomized fault
-  schedules (`crates/platform-worker/tests/partial_provision.rs`). They
-  injected:
-  - 41,855 provider faults: failures before any effect, lost create replies,
-    and calls that hang past the deadline after taking effect;
-  - 19,510 simulated worker crashes at every fault point;
-  - 9,150 partial rounds, each retried;
-  - 3,018 pre-existing resources, all adopted.
+- **Drill `partial-provision`, in process**
+  (`crates/platform-worker/tests/partial_provision.rs`). 10,000 seeded
+  fault schedules in each of three provider modes, 30,000 in all. Each
+  schedule mixes:
+  - failures before any effect;
+  - lost create replies;
+  - calls that hang past the deadline after taking effect;
+  - **creates that land after the deadline** (`LateEffect`, added after
+    the review);
+  - simulated worker crashes at every fault point;
+  - pre-existing resources.
 
-  The schedules planned 50,027 resources. Every operation converged with
-  **0 duplicates and 0 orphans**. 11,123 resources were adopted after a lost
-  reply or a crash instead of being created twice. The fake deliberately
-  allows duplicate names, so only the reconciler's observe-before-create rule
-  prevents them. A blind-retry reconciler is caught by the same oracle.
+  | Provider mode | Faults (late creates) | Crashes | Partial rounds retried | Outcome |
+  |---|---|---|---|---|
+  | **unique names** (like `CREATE DATABASE`) | 61,008 (2,947) | 22,741 | 15,797 | 0 duplicates, 0 orphans; 1,388 `AlreadyExists` answers, resolved by lookup and adoption |
+  | **idempotency keys** | 61,076 (2,951) | 22,761 | 15,913 | 0 duplicates, 0 orphans; 1,386 late creates replayed by key |
+  | **plain** (neither) | 56,368 (2,710) | 21,975 | 14,808 | 1,387 duplicates made by late creates, **every one reported** (step `blocked: duplicate`, operation `partial`); 0 silent, 0 orphans |
+
+  **Scope:** the plain row is the honest limit. A provider without unique
+  names or idempotency keys can be made to hold a duplicate by a create
+  that lands late, and no reconciler can prevent that. The platform's duty
+  there is to see it and report it (D-035), never to call it a success. The
+  first version of this memo claimed "0 duplicates" against a fake that
+  never delivered a create late, with workers that were killed but never
+  paused. The review showed both gaps; both are now drilled:
+  - a paused worker checks its lease before every provider call (D-029);
+  - creates carry an idempotency key;
+  - every create, and every adoption after an unknown outcome, is verified
+    by name.
+
+  A blind-retry reconciler is still caught by the same oracle.
 - **Drill `partial-provision`, process level**
-  (`crates/platform-worker/tests/kill_drill.rs`):
-  - The real worker binary on PostgreSQL was killed with SIGKILL (exit
-    signal 9 asserted) at three points of each of the five steps of the
-    starter plan. The points are: after the attempt is committed, after the
-    lookup, and after the create took effect but before it was recorded.
-    A sixteenth kill came after the finish.
-  - In 20 more cases the worker was not killed; instead every provider fault
-    hit every resource kind.
+  (`crates/platform-worker/tests/kill_drill.rs`, `pause_drill.rs`,
+  `concurrent_drill.rs`, all on PostgreSQL):
+  - **Kills:** the real worker binary was killed with SIGKILL (signal 9
+    asserted) at each step of the starter plan: after the attempt is
+    committed, after the lookup, and after the create took effect but
+    before it was recorded, plus once after the finish. That is 16 points,
+    run against both plain and unique-name providers: 32 cases.
+  - **Provider faults:** every fault against every resource kind in both
+    modes, plus a late create per kind: 50 cases.
+  - **A late create over HTTP** on a plain provider ends visibly `partial`,
+    never `succeeded`.
+  - **Pauses:** a worker paused past its lease does not call the provider;
+    one paused after its lease check has its stale create de-duplicated by
+    key.
+  - **Concurrency:** three workers of four tasks each, on 40 projects with
+    three operations each, with provider latency and 8% faults: every
+    operation succeeded, the provider held exactly the plan, 0 duplicates.
 
-  All 36 cases converged to exactly 5 provider resources, with every
-  recorded id matching the provider's. After a kill that followed a create,
-  the next worker adopted the resource: 5 creates for 5 resources.
-- **Control-API load smoke**
-  (`perf/results/`, 100,000-request scenario, 80% reads and 20% writes, at
-  2,000 requests/s offered against the fake provider with 0.1% faults). Both
-  runs were taken on an Apple M2 Pro laptop (12 cores, 32 GB) shared with
-  other builds. Its load average was **25–65**, well above the quiet-machine
-  bar of about 6, so both are busy-machine observations, not capacity. Both
-  runs **missed their latency thresholds and are kept**:
+- **Control-API load smoke** (`perf/results/`):
+  - **Scenario:** 100,000 requests, 80% reads and 20% writes, offered at
+    2,000 requests/s for 50 s against the fake provider with 0.1% faults.
+  - **Machine:** an Apple M2 Pro laptop (12 cores, 32 GB) shared with other
+    builds, at load average **25–65**, well above the quiet-machine bar of
+    about 6. Both runs are busy-machine observations, not capacity.
+  - **Result:** both runs **failed, and are kept**. Figures are
+    scenario-only (`http_req_failed{scenario:control_api}`; setup requests
+    excluded), with successes counted over the 50 s window:
 
-  | Run | Commit | Failed | Succeeded | Read p95 | Operations | Duplicates |
-  |---|---|---|---|---|---|---|
-  | 1 | `dbad75e` | 97% | ~53 requests/s | 1,027 ms | 2,226 | 0 |
-  | 2 | `f6da1a7` | 73% | ~435 requests/s | 363 ms | 7,104 | 0 |
+  | Run | Commit | Failed | Succeeded | Read p95 | Thresholds missed | Operations | Duplicates |
+  |---|---|---|---|---|---|---|---|
+  | 1 | `dbad75e` | 99.3% (95,481 of 96,120) | 639, about 13/s | 1,027 ms | error rate, `unexpected_status`, `dropped_iterations` (3,878), read p95 and p99, write p95 and p99: every threshold but `admission_refused` | 2,226 | 0 |
+  | 2 | `f6da1a7` | 74.4% (74,057 of 99,490) | 25,433, about 509/s | 363 ms | error rate, `unexpected_status`, read p95 and p99, write p95 and p99 (passed: `dropped_iterations` at 501, `admission_refused`) | 7,104 | 0 |
 
-  - Run 1 collapsed: 1 s pool timeouts queued up to the 512 in-flight bound,
-    and everything beyond was shed.
+  - Both missed the error-rate threshold (below 0.1%) by **740–990×**.
+  - Run 1 collapsed: 1 s pool timeouts queued up to the 512 in-flight
+    bound, and everything beyond was shed.
   - Run 2 followed three fixes: one round trip for each read and for the
-    claim, shedding at 128 in flight, and error causes now logged.
-  - In both runs every operation drained and the provider held exactly
+    claim, shedding at 128 in flight (now tested), and error causes logged.
+  - In both runs every operation drained, and the provider held exactly
     10,000 resources for 10,000 planned.
 
-  A reads-only probe failed the same way at that load, so the limit was the
-  saturated host, not the write path. A plumbing probe at 500 requests/s
-  passed with a read p95 under 9 ms. The quiet-machine smoke and the
-  1,000,000-request run are **owed**.
+  A reads-only probe and a plumbing probe at 500 requests/s (read p95
+  under 9 ms) were also taken. They live only in the git-ignored
+  `target/perf/` and ran on uncommitted trees, so they are anecdotes, not
+  evidence. The quiet-machine smoke and the 1,000,000-request run are
+  **owed**.
 
 What this says for the decision: reconciliation against a fake was made
-correct, and proven, within B0. The cost lies elsewhere: real adapters, their credentials,
-the extra threats and the components to operate. None of those buys back
-the work the products repeat.
+correct within B0, and the review's adversarial cases (paused workers, late
+creates) are now drilled. The cost lies elsewhere: real adapters, their
+credentials, the extra threats and the components to operate. None of
+those buys back the work the products repeat.
 
 ## 6. Versions verified on 2026-11-16
 
@@ -257,22 +361,25 @@ The control database in `deploy/compose.yaml` and CI uses
 
 > **Recommendation: stay parked, and meet the need with a copyable starter
 > template instead of a running control plane.** The three reference
-> workloads each run one Rust binary behind Caddy on a 2 GB droplet with
-> managed data and files, and the slice they all repeat (accounts,
-> workspaces, tokens, onboarding) is exactly what D-011 keeps a platform from
-> supplying. A control plane would therefore add all ten control-plane
+> workloads are planned to run as one Rust binary each, behind Caddy on a
+> 2 GB droplet with managed data and files. The slice they all repeat
+> (accounts, workspaces, tokens, onboarding) can be met by copy-and-own code
+> that each product runs on its own database. That is what D-011 allows and
+> what D-012 asked for. A control plane would add all ten control-plane
 > threats, five or more operated components and its own upgrade and restore
-> drills while removing none of that work. A template removes the
-> operational duplication with nothing new to run.
+> drills, without removing any of that work. Even its leanest form, a
+> reconciler CLI, provisions resources nobody needs provisioned today.
 
-What this means in practice, for the maintainer to accept or reject (P-2):
+**Decision:** accepted with corrections on 2026-11-16 by the coordinator,
+acting on the maintainer's delegation (D-036). In practice:
 
 - `backend-platform` keeps its status "parked (future horizon)". B0's spine
-  stays as the tested record of how reconciliation would be done. Nothing
-  past B0 starts.
-- The template is a separate piece of work, outside this repository and not
-  started here. Its first version is assembled from what Colophon and
-  Service Monitor already have.
+  stays as the tested record of how reconciliation would be done. B1–B7 do
+  not start.
+- The next milestone is **B1-T, the starter template**
+  (`docs/STARTER_TEMPLATE.md`). Its acceptance test has Durable Runner
+  adopt the template on a fresh droplet faster than a timed hand baseline.
+  Until that run exists, the template's benefit is a claim too.
 - D-019's certification wording is corrected (§6), and MinIO is recorded as
   excluded (D-031).
 
@@ -280,16 +387,19 @@ What this means in practice, for the maintainer to accept or reject (P-2):
 
 1. **Provisioning on demand becomes a real workload.** For example, new
    apps or friends' projects needing their own database, bucket and realm
-   arrive faster than they can be provisioned by hand. At three or more a
-   month, hand provisioning starts to cost more than running a reconciler.
-   No such demand exists today.
+   arrive faster than they can be provisioned by hand. The point where
+   hand provisioning costs more than a reconciler is **a guess, not a
+   derivation**: perhaps three or more a month. It should be measured
+   against the template's own provisioning steps once those are timed.
+   No such demand exists today. If it appears, (c) the reconciler CLI comes
+   before (b).
 2. **The products leave managed services** for self-hosted PostgreSQL and
    object storage on shared hosts. Then per-project roles, quotas and
    isolation (T3, D-017) become everyday needs that a reconciler does
    better than runbooks.
-3. **The template fails its own baseline.** If the D-028 operations script
-   with the template is not faster than doing it by hand, the case for
-   automation reopens.
+3. **The template fails its own baseline.** If B1-T's acceptance run, or
+   the D-028 operations script with the template, is not faster than doing
+   it by hand, the case for automation reopens.
 4. **People exist to validate it.** A second developer (P-3) and three
    outside teams (P-4) are the ship gate. Without them the platform cannot
    pass, however good the code is.
@@ -299,7 +409,6 @@ What this means in practice, for the maintainer to accept or reject (P-2):
 
 **Still owed for B0's own gate (independent of the verdict):**
 
-- the maintainer's acceptance of this memo (P-2);
 - a 100,000-request smoke on a quiet machine;
 - the 1,000,000-request control-API run, only when the load average is
   below about 6.
