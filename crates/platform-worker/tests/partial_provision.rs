@@ -409,6 +409,148 @@ async fn with_idempotency_keys_10000_fault_schedules_make_zero_duplicates() {
     );
 }
 
+/// A provider that refuses taken names (`CREATE DATABASE`, bucket names): zero duplicates
+/// over 10,000 schedules, through the `AlreadyExists` → look up → adopt path (F6).
+#[tokio::test]
+async fn with_unique_names_10000_fault_schedules_make_zero_duplicates() {
+    let totals = run_mode(Mode::Unique).await;
+    assert_eq!(totals.duplicates_reported_visibly, 0, "{totals:?}");
+    assert!(
+        totals.already_exists_answers > 100,
+        "the AlreadyExists path must be exercised: {totals:?}"
+    );
+}
+
+/// `AlreadyExists` → look up → adopt (F6): a create that landed late makes the retry's
+/// create collide; the step adopts the holder instead of failing or duplicating.
+#[tokio::test]
+async fn already_exists_after_a_late_create_is_adopted() {
+    let project = ProjectId::parse("drill").unwrap();
+    let desired = DesiredState {
+        databases: names("db", 1),
+        buckets: Vec::new(),
+        identity: None,
+    };
+    let plan = Plan::build(&project, &desired).unwrap();
+    let faults = FaultConfig {
+        rules: vec![FaultRule {
+            on: CallKind::Create,
+            kind: Some(ResourceKind::DatabaseRole),
+            nth: 1,
+            fault: Fault::LateEffect,
+        }],
+        random: None,
+    };
+    let provider = FakeProvider::new(FakeOptions {
+        faults,
+        unique_names: true,
+        record_calls: true,
+        ..FakeOptions::default()
+    });
+    let log = MemLog::default();
+    let id = OperationId(Uuid::from_u128(13));
+    log.insert(Operation::new(id, 1, &plan));
+    let claimed = platform_worker::OperationLog::claim(&log, Uuid::nil(), Duration::from_secs(1))
+        .await
+        .unwrap()
+        .unwrap();
+    let outcome = run_claimed(
+        &log,
+        &provider,
+        &platform_worker::NoHooks,
+        &config(),
+        claimed,
+        &mut 1,
+    )
+    .await
+    .unwrap();
+    assert_eq!(outcome, OperationOutcome::Succeeded);
+    let operation = log.get(id);
+    assert!(
+        matches!(
+            operation.steps[0].state,
+            StepState::Done { adopted: true, .. }
+        ),
+        "{:?}",
+        operation.steps[0].state
+    );
+    assert!(
+        provider
+            .calls()
+            .iter()
+            .any(|c| c.outcome == CallOutcome::AlreadyExists)
+    );
+    check(&plan, &provider, Some(&operation)).unwrap();
+}
+
+/// A provider whose name index lags: it answers `AlreadyExists` to the create, but the
+/// re-lookup still sees nothing. The step stays uncertain and retries; it never records a
+/// resource it has not seen, and never creates blindly (the `Absent` branch, F6).
+struct LaggingIndex {
+    creates: std::sync::atomic::AtomicU32,
+}
+
+impl platform_adapters::Provider for LaggingIndex {
+    async fn lookup(
+        &self,
+        _kind: ResourceKind,
+        _name: &platform_domain::ProviderName,
+    ) -> Result<platform_domain::Observation, platform_adapters::ProviderError> {
+        Ok(platform_domain::Observation::Absent)
+    }
+
+    async fn create(
+        &self,
+        _request: &CreateRequest,
+    ) -> Result<platform_domain::ProviderResourceId, platform_adapters::ProviderError> {
+        self.creates
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        Err(platform_adapters::ProviderError::AlreadyExists)
+    }
+}
+
+#[tokio::test]
+async fn already_exists_with_no_visible_holder_stays_uncertain_then_gives_up() {
+    let project = ProjectId::parse("drill").unwrap();
+    let desired = DesiredState {
+        databases: Vec::new(),
+        buckets: names("files", 1),
+        identity: None,
+    };
+    let plan = Plan::build(&project, &desired).unwrap();
+    let provider = LaggingIndex {
+        creates: std::sync::atomic::AtomicU32::new(0),
+    };
+    let log = MemLog::default();
+    let id = OperationId(Uuid::from_u128(14));
+    log.insert(Operation::new(id, 1, &plan));
+    let claimed = platform_worker::OperationLog::claim(&log, Uuid::nil(), Duration::from_secs(1))
+        .await
+        .unwrap()
+        .unwrap();
+    let outcome = run_claimed(
+        &log,
+        &provider,
+        &platform_worker::NoHooks,
+        &config(),
+        claimed,
+        &mut 1,
+    )
+    .await
+    .unwrap();
+    let operation = log.get(id);
+    assert_eq!(outcome, OperationOutcome::Partial);
+    assert_eq!(operation.steps[0].state, StepState::GaveUp);
+    assert_eq!(
+        operation.steps[0].last_error,
+        Some(platform_domain::ErrorClass::AlreadyExists)
+    );
+    assert_eq!(
+        provider.creates.load(std::sync::atomic::Ordering::SeqCst),
+        u32::from(config().policy.max_attempts)
+    );
+}
+
 /// The drill can fail: a reconciler that retries a failed create without observing first
 /// is caught as duplicates (and orphans) by the same oracle.
 #[tokio::test]

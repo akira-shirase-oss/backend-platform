@@ -265,12 +265,15 @@ starting values; changing one needs a measurement and a new entry.
   unique-names mode exists for the `AlreadyExists` path, and a key-honoring
   mode for idempotency keys. Besides failing before any effect, losing the
   reply and hanging past the deadline, the fake can apply a create late
-  (`LateEffect`, D-035). The drill has two
-  halves:
-  - 10,000 seeded schedules in process, through the production reconcile
-    code and an in-memory log with the same fencing rules;
-  - the real worker binary on PostgreSQL, killed with SIGKILL at every step
-    and fault point, plus every provider fault against every kind.
+  (`LateEffect`, D-035). The drill has two halves, and runs against each
+  kind of provider (review F6):
+  - 10,000 seeded schedules in process for each of three providers (plain,
+    keyed, unique names), through the production reconcile code and an
+    in-memory log with the same fencing rules. The unique-names run must
+    exercise `AlreadyExists` → look up → adopt (more than 100 answers);
+  - the real worker binary on PostgreSQL against plain and unique-name
+    providers: killed with SIGKILL at every step and fault point, plus
+    every provider fault against every kind, and a late create per kind.
 
   A blind-retry reconciler is caught by the same oracle (the drill can
   fail). Cost: the fake is not a real provider; B2 repeats the drill

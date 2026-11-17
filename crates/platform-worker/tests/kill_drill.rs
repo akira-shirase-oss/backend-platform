@@ -223,9 +223,9 @@ async fn sigkill(mut child: Child, label: &str) {
     );
 }
 
-async fn kill_case(point: &'static str, position: u16) -> String {
-    let label = format!("kill -9 at {point}:{position}");
-    let case = Case::new(FaultConfig::default()).await;
+async fn kill_case(point: &'static str, position: u16, names: Names) -> String {
+    let label = format!("kill -9 at {point}:{position} ({names:?} names)");
+    let case = Case::with(names.options(FaultConfig::default())).await;
     let first = case.worker(Some(&format!("{point}:{position}")));
     let halted = wait_for_halt(&case.logs, &label).await;
     // While parked, the operation shows exactly where it is: never fabricated success.
@@ -258,11 +258,27 @@ async fn kill_case(point: &'static str, position: u16) -> String {
     format!("{label}: {halted}; converged, {creates} creates for 5 resources")
 }
 
-async fn provider_case(on: CallKind, kind: ResourceKind, fault: Fault, keys: bool) -> String {
-    let label = format!(
-        "{fault:?} on {on:?} of {kind}{}",
-        if keys { " (idempotency keys)" } else { "" }
-    );
+/// What the provider promises about names (F6: the drill runs both plain and unique).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Names {
+    Plain,
+    Keys,
+    Unique,
+}
+
+impl Names {
+    fn options(self, faults: FaultConfig) -> FakeOptions {
+        FakeOptions {
+            faults,
+            honor_idempotency_keys: self == Self::Keys,
+            unique_names: self == Self::Unique,
+            ..FakeOptions::default()
+        }
+    }
+}
+
+async fn provider_case(on: CallKind, kind: ResourceKind, fault: Fault, names: Names) -> String {
+    let label = format!("{fault:?} on {on:?} of {kind} ({names:?} names)");
     let faults = FaultConfig {
         rules: vec![FaultRule {
             on,
@@ -272,12 +288,7 @@ async fn provider_case(on: CallKind, kind: ResourceKind, fault: Fault, keys: boo
         }],
         random: None,
     };
-    let case = Case::with(FakeOptions {
-        faults,
-        honor_idempotency_keys: keys,
-        ..FakeOptions::default()
-    })
-    .await;
+    let case = Case::with(names.options(faults)).await;
     let worker = case.worker(None);
     case.wait_until_succeeded(&label).await;
     case.verify(&label).await;
@@ -292,33 +303,45 @@ async fn provider_case(on: CallKind, kind: ResourceKind, fault: Fault, keys: boo
 async fn kill_dash_nine_at_every_step_converges_on_retry() {
     let mut cases = tokio::task::JoinSet::new();
     let gate = Arc::new(tokio::sync::Semaphore::new(6));
-    for position in 0..5_u16 {
-        for point in ["after-begin", "after-lookup", "after-create"] {
-            let gate = gate.clone();
-            cases.spawn(async move {
-                let _permit = gate.acquire_owned().await.unwrap();
-                kill_case(point, position).await
-            });
+    for names in [Names::Plain, Names::Unique] {
+        for position in 0..5_u16 {
+            for point in ["after-begin", "after-lookup", "after-create"] {
+                let gate = gate.clone();
+                cases.spawn(async move {
+                    let _permit = gate.acquire_owned().await.unwrap();
+                    kill_case(point, position, names).await
+                });
+            }
         }
+        let gate2 = gate.clone();
+        cases.spawn(async move {
+            let _permit = gate2.acquire_owned().await.unwrap();
+            kill_case("after-finish", 0, names).await
+        });
     }
-    let gate2 = gate.clone();
-    cases.spawn(async move {
-        let _permit = gate2.acquire_owned().await.unwrap();
-        kill_case("after-finish", 0).await
-    });
     let mut report = cases.join_all().await;
     report.sort();
     for line in &report {
         eprintln!("{line}");
     }
-    assert_eq!(report.len(), 16);
+    assert_eq!(report.len(), 32);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn provider_failures_at_every_kind_converge() {
     let mut cases = tokio::task::JoinSet::new();
     let gate = Arc::new(tokio::sync::Semaphore::new(6));
-    for kind in ResourceKind::ALL {
+    for (kind, names) in ResourceKind::ALL
+        .into_iter()
+        .flat_map(|k| [(k, Names::Plain), (k, Names::Unique)])
+    {
+        // A late create: plain names cannot be made duplicate-free (that case is reported,
+        // see below); with keys it is replayed, with unique names it is adopted.
+        let late_names = if names == Names::Plain {
+            Names::Keys
+        } else {
+            Names::Unique
+        };
         for (on, fault) in [
             (CallKind::Lookup, Fault::FailBefore),
             (CallKind::Create, Fault::FailBefore),
@@ -328,7 +351,7 @@ async fn provider_failures_at_every_kind_converge() {
             let gate = gate.clone();
             cases.spawn(async move {
                 let _permit = gate.acquire_owned().await.unwrap();
-                provider_case(on, kind, fault, false).await
+                provider_case(on, kind, fault, names).await
             });
         }
         // A create that lands after the deadline, on a provider that de-duplicates by key:
@@ -336,7 +359,7 @@ async fn provider_failures_at_every_kind_converge() {
         let gate = gate.clone();
         cases.spawn(async move {
             let _permit = gate.acquire_owned().await.unwrap();
-            provider_case(CallKind::Create, kind, Fault::LateEffect, true).await
+            provider_case(CallKind::Create, kind, Fault::LateEffect, late_names).await
         });
     }
     let mut report = cases.join_all().await;
@@ -344,7 +367,7 @@ async fn provider_failures_at_every_kind_converge() {
     for line in &report {
         eprintln!("{line}");
     }
-    assert_eq!(report.len(), 25);
+    assert_eq!(report.len(), 50);
 }
 
 /// A create that lands after the deadline on a provider with neither keys nor unique
