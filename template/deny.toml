@@ -22,8 +22,8 @@ wildcards = "deny"
 allow-wildcard-paths = true
 highlight = "all"
 deny = [
-    { crate = "openssl", reason = "no TLS stack: the service is behind Caddy on loopback; rustls if one is ever needed" },
-    { crate = "openssl-sys", reason = "no TLS stack: the service is behind Caddy on loopback; rustls if one is ever needed" },
+    { crate = "openssl", reason = "one TLS stack: rustls (the database client; the service is behind Caddy)" },
+    { crate = "openssl-sys", reason = "one TLS stack: rustls (the database client; the service is behind Caddy)" },
     { crate = "async-std", reason = "one async runtime: tokio" },
 ]
 skip = []

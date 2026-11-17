@@ -1,6 +1,7 @@
-# The copy's CI. GitHub runs it once this directory is a repository's root: the gate
-# (scripts/check.sh, the same script developers run), and the limit proofs, on every push
-# and pull request, and daily, so a new advisory fails the build without a push.
+# The copy's CI. GitHub runs it once this directory is a repository's root: the README's
+# quickstart ending with the gate (scripts/check.sh, the same script developers run), the
+# limit proofs, and the operator guide followed end to end, on every push and pull request,
+# and daily, so a new advisory fails the build without a push.
 name: ci
 
 on:
@@ -48,8 +49,9 @@ jobs:
           scripts/install-age.sh "$RUNNER_TEMP/bin"
           scripts/install-k6.sh "$RUNNER_TEMP/bin"
           echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
-      - name: Gate
-        run: scripts/check.sh
+      # The README's quickstart, as written; it ends with the gate (scripts/check.sh).
+      - name: The README quickstart, then the gate
+        run: scripts/test-readme.sh
 
   limits:
     name: every limit's test fails without the limit (scripts/prove-limits.sh)
@@ -70,3 +72,31 @@ jobs:
         run: |
           eval "$(scripts/stack.sh env)"
           scripts/prove-limits.sh
+
+  # The production path, end to end: the operator guide's install, check, upgrade and
+  # rollback blocks run as written on an Ubuntu 24.04 VM with systemd
+  # (scripts/test-install.sh): hardening, env and credentials, the hardened unit,
+  # Caddy with TLS, deploy and rollback.
+  install:
+    name: the operator guide, end to end on Ubuntu 24.04 with systemd
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install the pinned toolchain
+        run: |
+          channel=$(sed -n 's/^channel = "\(.*\)"$/\1/p' rust-toolchain.toml)
+          rustup toolchain install "$channel" --profile minimal --component clippy,rustfmt
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      - name: What a fresh droplet has (openssh-server, ufw)
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q openssh-server ufw
+      - name: The release build
+        run: cargo build --release --locked -p starter-server
+      - name: The database (standing in for Neon)
+        run: scripts/stack.sh up
+      - name: Follow the operator guide
+        run: sudo -E env "PATH=$PATH" scripts/test-install.sh

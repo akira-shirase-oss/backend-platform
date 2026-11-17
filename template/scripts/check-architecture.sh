@@ -15,6 +15,8 @@
 #   ARCH_DOMAIN_PATTERN='re'    source pattern banned in the domain rules
 #   ARCH_SHIPPED_FEATURE='f'    feature that must not be enabled in the shipped build
 set -euo pipefail
+case "${1:-}" in -h|--help) sed -n '2,/^set -euo/p' "$0" | sed '$d' | sed 's/^# \{0,1\}//'; exit 0 ;; esac
+[ $# -eq 0 ] || { echo "check-architecture.sh: takes no arguments (see --help)" >&2; exit 2; }
 cd "${ARCH_ROOT:-$(dirname "$0")/..}"
 mode="${ARCH_CARGO_MODE:---locked}"
 

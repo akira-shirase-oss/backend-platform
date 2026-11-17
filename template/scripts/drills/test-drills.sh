@@ -3,8 +3,11 @@
 #   - on a source whose protections were weakened (the restore would copy the weakness);
 #   - when the key backup is not the identity the copies were encrypted to.
 set -euo pipefail
+case "${1:-}" in -h|--help) sed -n '2,/^set -euo/p' "$0" | sed '$d' | sed 's/^# \{0,1\}//'; exit 0 ;; esac
+[ $# -eq 0 ] || { echo "test-drills.sh: takes no arguments (see --help)" >&2; exit 2; }
 cd "$(dirname "$0")/../.."
 . scripts/drills/lib.sh
+require_database tools
 STARTERCTL="${STARTERCTL:-target/debug/starterctl}"
 work="$(mktemp -d "${TMPDIR:-/tmp}/starter-drill-controls.XXXXXX")"
 weak="starter_control_$(date -u +%Y%m%d%H%M%S)_$$"

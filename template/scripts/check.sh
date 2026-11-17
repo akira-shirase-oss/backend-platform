@@ -13,6 +13,8 @@
 # Needs: the pinned toolchain through rustup, docker (or STARTER_TEST_DATABASE_URL), and
 # cargo-deny (skipped with a note when absent; CI always runs it).
 set -euo pipefail
+case "${1:-}" in -h|--help) sed -n '2,/^set -euo/p' "$0" | sed '$d' | sed 's/^# \{0,1\}//'; exit 0 ;; esac
+[ $# -eq 0 ] || { echo "check.sh: takes no arguments (see --help)" >&2; exit 2; }
 cd "$(dirname "$0")/.."
 
 step() { printf '\n== %s\n' "$1"; }
@@ -25,6 +27,9 @@ cargo fmt --all -- --check
 
 step "clippy (-D warnings)"
 cargo clippy --workspace --all-targets --locked -- -D warnings
+
+step "every script explains itself (--help) and refuses unknown arguments"
+scripts/test-help.sh
 
 step "architecture, and that each rule can fail"
 scripts/check-architecture.sh

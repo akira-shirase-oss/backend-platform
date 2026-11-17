@@ -14,11 +14,16 @@
 # Builds into target/prove (this copy's own target directory); the scratch source is
 # deleted at the end.
 set -euo pipefail
+case "${1:-}" in -h|--help) sed -n '2,/^set -euo/p' "$0" | sed '$d' | sed 's/^# \{0,1\}//'; exit 0 ;; esac
 cd "$(dirname "$0")/.."
 here="$PWD"
 out=""
-if [ "${1:-}" = "--out" ]; then out="$2"; fi
-: "${STARTER_TEST_DATABASE_URL:?set it (scripts/stack.sh env)}"
+case "${1:-}" in
+  "") ;;
+  --out) out="${2:?--out needs a file}" ;;
+  *) echo "prove-limits.sh: unknown argument $1 (see --help)" >&2; exit 2 ;;
+esac
+: "${STARTER_TEST_DATABASE_URL:?is not set. Start the database and export its address: scripts/stack.sh up; eval \"\$(scripts/stack.sh env)\"}"
 
 work="$(mktemp -d "${TMPDIR:-/tmp}/starter-prove.XXXXXX")"
 trap 'rm -rf "$work"' EXIT

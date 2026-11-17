@@ -20,6 +20,7 @@
 # Take the pre-upgrade snapshot first (docs/OPERATIONS.md, "Upgrade"): rolling a binary back
 # past a migration means restoring it.
 set -euo pipefail
+case "${1:-}" in -h|--help) sed -n '2,/^set -euo/p' "$0" | sed '$d' | sed 's/^# \{0,1\}//'; exit 0 ;; esac
 
 prefix="" release="" from="" service="" ready=""
 while [ $# -gt 0 ]; do
@@ -29,7 +30,7 @@ while [ $# -gt 0 ]; do
     --from) from="$2"; shift 2 ;;
     --service) service="$2"; shift 2 ;;
     --ready-url) ready="$2"; shift 2 ;;
-    *) echo "deploy: unknown argument $1" >&2; exit 2 ;;
+    *) echo "deploy: unknown argument $1 (see --help)" >&2; exit 2 ;;
   esac
 done
 [ -n "$prefix" ] && [ -n "$release" ] && [ -n "$from" ] || { echo "usage: deploy.sh --prefix DIR --release NAME --from BIN_DIR [--service UNIT] [--ready-url URL]" >&2; exit 2; }

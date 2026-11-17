@@ -15,6 +15,7 @@
 # server replays it, and every run must come back with the same id, state and finished time.
 # The restored server must then drain on SIGTERM and exit 0. Needs python3, curl, tar, age.
 set -euo pipefail
+case "${1:-}" in -h|--help) sed -n '2,/^set -euo/p' "$0" | sed '$d' | sed 's/^# \{0,1\}//'; exit 0 ;; esac
 cd "$(dirname "$0")/../.."
 . scripts/drills/lib.sh
 
@@ -27,7 +28,7 @@ while [ $# -gt 0 ]; do
     --port) port="$2"; shift 2 ;;
     --jobs) jobs="$2"; shift 2 ;;
     --out) out="$2"; shift 2 ;;
-    *) echo "unknown argument $1" >&2; exit 2 ;;
+    *) echo "$(basename "$0"): unknown argument $1 (see --help)" >&2; exit 2 ;;
   esac
 done
 [ -x "$server" ] && [ -x "$cli" ] && [ -f "$handler" ] || { echo "usage: journal-restore.sh --server BIN --cli BIN --handler PATH" >&2; exit 2; }
@@ -84,7 +85,9 @@ PY
 }
 all_done() {
   for _ in $(seq 1 240); do
-    record_runs "$port" "$DRILL_WORK/before" && ! grep -vq '"done"' "$DRILL_WORK/before" && return 0
+    record_runs "$port" "$DRILL_WORK/before" \
+      && [ "$(grep -c '"done"' "$DRILL_WORK/before")" = "$jobs" ] && [ "$(wc -l <"$DRILL_WORK/before" | tr -d ' ')" = "$jobs" ] \
+      && return 0
     sleep 0.25
   done
   return 1
@@ -101,7 +104,8 @@ replay() {
     --handler "step=http://127.0.0.1:$hport/step" >"$DRILL_WORK/restored.log" 2>&1 &
   restored_pid=$!
   pids+=($restored_pid)
-  healthy "$rport" && record_runs "$rport" "$DRILL_WORK/after" && cmp -s "$DRILL_WORK/before" "$DRILL_WORK/after"
+  healthy "$rport" && record_runs "$rport" "$DRILL_WORK/after" && cmp -s "$DRILL_WORK/before" "$DRILL_WORK/after" \
+    && [ "$(wc -l <"$DRILL_WORK/after" | tr -d ' ')" = "$jobs" ]
 }
 step "a second server replays it: every run has the same id, state and finish" replay
 drain() { kill -TERM "$restored_pid" && wait "$restored_pid"; }

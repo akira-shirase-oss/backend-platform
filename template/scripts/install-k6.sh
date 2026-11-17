@@ -4,6 +4,8 @@
 #
 #   scripts/install-k6.sh [directory]
 set -euo pipefail
+case "${1:-}" in -h|--help) sed -n '2,/^set -euo/p' "$0" | sed '$d' | sed 's/^# \{0,1\}//'; exit 0 ;; esac
+case "${1:-}" in -*) echo "install-k6.sh: unknown option $1; the only argument is a directory (see --help)" >&2; exit 2 ;; esac
 
 readonly VERSION="v2.3.0"
 dest="${1:-$HOME/.local/bin}"

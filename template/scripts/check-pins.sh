@@ -6,6 +6,8 @@
 # Usage: scripts/check-pins.sh [file ...]   (default: deploy/*.yaml .github/workflows/*.yml)
 # Passing files is how scripts/check.sh proves the check can fail.
 set -euo pipefail
+case "${1:-}" in -h|--help) sed -n '2,/^set -euo/p' "$0" | sed '$d' | sed 's/^# \{0,1\}//'; exit 0 ;; esac
+for f in "$@"; do [ -f "$f" ] || { echo "check-pins.sh: no such file: $f (see --help)" >&2; exit 2; }; done
 cd "$(dirname "$0")/.."
 
 if (( $# )); then files=("$@"); else files=(deploy/*.yaml .github/workflows/*.yml); fi

@@ -19,6 +19,22 @@
 DRILL_STEPS=()
 DRILL_PASSED=true
 
+# Stops with what to do when the database or the PostgreSQL tools are missing.
+require_database() {
+  local me
+  me="$(basename "$0")"
+  if [ -z "${STARTER_TEST_DATABASE_URL:-}" ]; then
+    echo "$me: STARTER_TEST_DATABASE_URL is not set. Start the database and export its address:" >&2
+    echo "  scripts/stack.sh up && eval \"\$(scripts/stack.sh env)\"" >&2
+    exit 2
+  fi
+  if [ "${1:-}" = tools ] && [ -z "${STARTER_PG_CONTAINER:-}" ] && ! command -v pg_dump >/dev/null 2>&1; then
+    echo "$me: pg_dump and pg_restore are needed: set STARTER_PG_CONTAINER (scripts/stack.sh env sets it)," >&2
+    echo "  or install the PostgreSQL 18 client tools" >&2
+    exit 2
+  fi
+}
+
 drill_begin() {
   DRILL_NAME="$1"
   DRILL_OUT="$2"
@@ -84,14 +100,14 @@ pg_admin_parts() { # url -> sets PGU PGW PGH PGP
 }
 
 pg() { # tool args... (connects as the administrator; -d names the database)
-  pg_admin_parts "${STARTER_TEST_DATABASE_URL:?STARTER_TEST_DATABASE_URL, an administrator}"
+  pg_admin_parts "${STARTER_TEST_DATABASE_URL:?is not set (see require_database)}"
   pg_as "$PGU" "$PGW" "$@"
 }
 
 pg_as() { # user password tool args...
   local user="$1" password="$2"
   shift 2
-  pg_admin_parts "${STARTER_TEST_DATABASE_URL:?STARTER_TEST_DATABASE_URL, an administrator}"
+  pg_admin_parts "${STARTER_TEST_DATABASE_URL:?is not set (see require_database)}"
   if [ -n "${STARTER_PG_CONTAINER:-}" ]; then
     docker exec -i -e PGPASSWORD="$password" "$STARTER_PG_CONTAINER" "$1" -h 127.0.0.1 -p 5432 -U "$user" "${@:2}"
   else
@@ -101,7 +117,7 @@ pg_as() { # user password tool args...
 
 # URL of `role` on `database`, from the administrator's URL.
 role_url() { # role password database
-  pg_admin_parts "${STARTER_TEST_DATABASE_URL:?STARTER_TEST_DATABASE_URL, an administrator}"
+  pg_admin_parts "${STARTER_TEST_DATABASE_URL:?is not set (see require_database)}"
   echo "postgres://$1:$2@$PGH:$PGP/$3"
 }
 

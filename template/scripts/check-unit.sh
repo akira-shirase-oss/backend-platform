@@ -5,11 +5,14 @@
 #
 #   scripts/check-unit.sh [unit-file] [threshold]
 set -euo pipefail
+case "${1:-}" in -h|--help) sed -n '2,/^set -euo/p' "$0" | sed '$d' | sed 's/^# \{0,1\}//'; exit 0 ;; esac
 cd "$(dirname "$0")/.."
 unit="${1:-deploy/starter.service}"
 threshold="${2:-20}"
 readonly IMAGE="ubuntu:24.04@sha256:73b999393d07f2bf65a40373778a44dc9a6d54ad7718d29247d8ff9413c4d6a8"
-name="$(basename "$unit")"
+name="${unit##*/}"
+[ -f "$unit" ] || { echo "check-unit.sh: no such unit file: $unit (see --help)" >&2; exit 2; }
+[[ "$threshold" =~ ^[0-9]+$ ]] || { echo "check-unit.sh: the threshold is a whole number of tenths, e.g. 20 for 2.0 (see --help)" >&2; exit 2; }
 
 # Prints the overall line; exits non-zero above the threshold.
 analyze='mkdir -p /tmp/units && cp "$0" /tmp/units/ && out=$(systemd-analyze security --offline=true --no-pager --threshold="$1" "/tmp/units/$2"); status=$?; echo "$out" | tail -1; exit $status'

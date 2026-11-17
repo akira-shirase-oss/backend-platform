@@ -3,6 +3,8 @@
 # Homebrew's cargo ignores toolchain files; run cargo through rustup's proxies instead:
 #   export PATH="$(brew --prefix rustup)/bin:$PATH"
 set -euo pipefail
+case "${1:-}" in -h|--help) sed -n '2,/^set -euo/p' "$0" | sed '$d' | sed 's/^# \{0,1\}//'; exit 0 ;; esac
+[ $# -eq 0 ] || { echo "check-toolchain.sh: takes no arguments (see --help)" >&2; exit 2; }
 cd "$(dirname "$0")/.."
 
 want="$(sed -n 's/^channel *= *"\(.*\)"/\1/p' rust-toolchain.toml)"

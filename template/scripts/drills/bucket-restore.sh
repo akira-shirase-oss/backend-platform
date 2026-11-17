@@ -11,6 +11,7 @@
 # hashes). The remotes come from rclone's own configuration (RCLONE_CONFIG), which holds the
 # keys: never this repository. Not yet run: this repository holds no bucket credentials.
 set -euo pipefail
+case "${1:-}" in -h|--help) sed -n '2,/^set -euo/p' "$0" | sed '$d' | sed 's/^# \{0,1\}//'; exit 0 ;; esac
 cd "$(dirname "$0")/../.."
 . scripts/drills/lib.sh
 
@@ -20,7 +21,7 @@ while [ $# -gt 0 ]; do
     --source) source_bucket="$2"; shift 2 ;;
     --target) target_bucket="$2"; shift 2 ;;
     --out) out="$2"; shift 2 ;;
-    *) echo "unknown argument $1" >&2; exit 2 ;;
+    *) echo "$(basename "$0"): unknown argument $1 (see --help)" >&2; exit 2 ;;
   esac
 done
 [ -n "$source_bucket" ] && [ -n "$target_bucket" ] || { echo "usage: bucket-restore.sh --source REMOTE:BUCKET --target REMOTE:BUCKET" >&2; exit 2; }

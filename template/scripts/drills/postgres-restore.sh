@@ -20,6 +20,7 @@
 # NEON_BRANCH_ID, NEON_DATABASE, NEON_OWNER_ROLE and STARTER_MIGRATION_DATABASE_URL_FILE (the
 # source, as the owner). Not yet run against Neon: this repository holds no Neon credentials.
 set -euo pipefail
+case "${1:-}" in -h|--help) sed -n '2,/^set -euo/p' "$0" | sed '$d' | sed 's/^# \{0,1\}//'; exit 0 ;; esac
 cd "$(dirname "$0")/../.."
 . scripts/drills/lib.sh
 
@@ -30,7 +31,7 @@ while [ $# -gt 0 ]; do
     --out) out="$2"; shift 2 ;;
     --neon) neon=true; shift ;;
     --promote) promote=true; shift ;;
-    *) echo "unknown argument $1" >&2; exit 2 ;;
+    *) echo "$(basename "$0"): unknown argument $1 (see --help)" >&2; exit 2 ;;
   esac
 done
 STARTERCTL="${STARTERCTL:-target/debug/starterctl}"
@@ -79,6 +80,7 @@ if $neon; then
   exit 0
 fi
 
+require_database tools
 drill_begin postgres-restore "$out"
 source_db="${database:-starter_drill_$(date -u +%Y%m%d%H%M%S)_$$}"
 copy_db="${source_db}_restored"

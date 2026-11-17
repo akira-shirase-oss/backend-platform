@@ -12,6 +12,7 @@
 # fixture database is made, and since nothing writes it the restored copy must also match
 # the source itself. Needs sqlite3 and age.
 set -euo pipefail
+case "${1:-}" in -h|--help) sed -n '2,/^set -euo/p' "$0" | sed '$d' | sed 's/^# \{0,1\}//'; exit 0 ;; esac
 cd "$(dirname "$0")/../.."
 . scripts/drills/lib.sh
 
@@ -20,7 +21,7 @@ while [ $# -gt 0 ]; do
   case "$1" in
     --db) db="$2"; shift 2 ;;
     --out) out="$2"; shift 2 ;;
-    *) echo "unknown argument $1" >&2; exit 2 ;;
+    *) echo "$(basename "$0"): unknown argument $1 (see --help)" >&2; exit 2 ;;
   esac
 done
 command -v sqlite3 >/dev/null || { echo "sqlite3 is required" >&2; exit 1; }

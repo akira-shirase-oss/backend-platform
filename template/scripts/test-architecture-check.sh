@@ -4,6 +4,8 @@
 # test support enabled in the shipped build. Each variant patches a throwaway copy; the
 # check must fail on it, for that reason.
 set -euo pipefail
+case "${1:-}" in -h|--help) sed -n '2,/^set -euo/p' "$0" | sed '$d' | sed 's/^# \{0,1\}//'; exit 0 ;; esac
+[ $# -eq 0 ] || { echo "test-architecture-check.sh: takes no arguments (see --help)" >&2; exit 2; }
 cd "$(dirname "$0")/.."
 
 work="$(mktemp -d)"

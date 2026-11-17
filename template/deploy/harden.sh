@@ -10,12 +10,17 @@
 # replaced: HARDEN_SSHD_T and HARDEN_UFW_STATUS name files holding those commands' output,
 # HARDEN_ROOT prefixes every path read.
 set -euo pipefail
+case "${1:-}" in -h|--help) sed -n '2,/^set -euo/p' "$0" | sed '$d' | sed 's/^# \{0,1\}//'; exit 0 ;; esac
 
 root="${HARDEN_ROOT:-}"
 auto="$root/etc/apt/apt.conf.d/20auto-upgrades"
 
 sshd_effective() {
-  if [ -n "${HARDEN_SSHD_T:-}" ]; then cat "$HARDEN_SSHD_T"; else sshd -T 2>/dev/null; fi
+  if [ -n "${HARDEN_SSHD_T:-}" ]; then cat "$HARDEN_SSHD_T"; return; fi
+  # Ubuntu 24.04 starts sshd by socket: until a first connection its privilege-separation
+  # directory may not exist, and `sshd -T` refuses to run without it.
+  [ -d /run/sshd ] || mkdir -p /run/sshd 2>/dev/null || true
+  sshd -T 2>/dev/null
 }
 ufw_status() {
   if [ -n "${HARDEN_UFW_STATUS:-}" ]; then cat "$HARDEN_UFW_STATUS"; else ufw status verbose 2>/dev/null; fi
@@ -60,8 +65,11 @@ KbdInteractiveAuthentication no
 PubkeyAuthentication yes
 PermitRootLogin prohibit-password
 CONF
+  command -v sshd >/dev/null || { echo "harden: openssh-server is not installed" >&2; exit 1; }
+  mkdir -p /run/sshd
   sshd -t
-  systemctl reload ssh
+  # Reload if it runs; with socket activation the next connection reads the new file.
+  systemctl try-reload-or-restart ssh
   apt-get update -q
   DEBIAN_FRONTEND=noninteractive apt-get install -y -q ufw unattended-upgrades
   ufw default deny incoming
@@ -78,5 +86,5 @@ CONF
 case "${1:-}" in
   check) check ;;
   apply) apply ;;
-  *) echo "usage: deploy/harden.sh apply|check" >&2; exit 2 ;;
+  *) echo "harden: unknown command '${1:-}'. Commands: apply, check (see --help)" >&2; exit 2 ;;
 esac

@@ -17,11 +17,17 @@
 # (STARTER_PG_CONTAINER or PATH), curl, jq, python3. Ports 61451 (server), 61459 (a fake
 # SMTP sink). Builds vN+1 into target/rehearsal; the scratch source and prefix are deleted.
 set -euo pipefail
+case "${1:-}" in -h|--help) sed -n '2,/^set -euo/p' "$0" | sed '$d' | sed 's/^# \{0,1\}//'; exit 0 ;; esac
 cd "$(dirname "$0")/.."
 . scripts/drills/lib.sh
 
 out="target/drills/upgrade-rehearsal.json"
-[ "${1:-}" = "--out" ] && out="$2"
+case "${1:-}" in
+  "") ;;
+  --out) out="${2:?--out needs a file}" ;;
+  *) echo "upgrade-rehearsal.sh: unknown argument $1 (see --help)" >&2; exit 2 ;;
+esac
+require_database tools
 port=61451
 sink_port=61459
 base="http://127.0.0.1:$port"

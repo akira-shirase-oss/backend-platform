@@ -8,6 +8,7 @@
 # Restore the pre-upgrade snapshot first (docs/OPERATIONS.md, "Rollback"), then run this
 # again.
 set -euo pipefail
+case "${1:-}" in -h|--help) sed -n '2,/^set -euo/p' "$0" | sed '$d' | sed 's/^# \{0,1\}//'; exit 0 ;; esac
 
 prefix="" to="" service="" ready=""
 while [ $# -gt 0 ]; do
@@ -16,7 +17,7 @@ while [ $# -gt 0 ]; do
     --to) to="$2"; shift 2 ;;
     --service) service="$2"; shift 2 ;;
     --ready-url) ready="$2"; shift 2 ;;
-    *) echo "rollback: unknown argument $1" >&2; exit 2 ;;
+    *) echo "rollback: unknown argument $1 (see --help)" >&2; exit 2 ;;
   esac
 done
 [ -n "$prefix" ] || { echo "usage: rollback.sh --prefix DIR [--to NAME] [--service UNIT] [--ready-url URL]" >&2; exit 2; }

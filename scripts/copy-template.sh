@@ -1,0 +1,120 @@
+#!/usr/bin/env bash
+# Copies the starter template into a new directory and renames it for a product
+# (template/docs/COPYING.md). The copy is the product's from then on: nothing in it refers
+# back to this repository except TEMPLATE_ORIGIN, which records the commit it came from so
+# later template changes can be pulled as a reviewed diff.
+#
+#   scripts/copy-template.sh DEST NAME [--verify]
+#
+# NAME is 2-16 lower-case letters and digits, starting with a letter (`durable`, `smon`).
+# It renames the crates (starter-http -> NAME-http, ...), the operator tool (NAME-ctl ->
+# NAMEctl), the variables (STARTER_ -> NAME_), the database roles, the unit, the paths and
+# the compose project. --verify then builds and tests the copy (its own target directory
+# under the copy; needs STARTER_TEST_DATABASE_URL, an administrator).
+set -euo pipefail
+case "${1:-}" in -h|--help) sed -n '2,/^set -euo/p' "$0" | sed '$d' | sed 's/^# \{0,1\}//'; exit 0 ;; esac
+case "${1:-}" in -*) echo "copy-template.sh: unknown option $1 (see --help)" >&2; exit 2 ;; esac
+cd "$(dirname "$0")/.."
+
+dest="${1:?usage: copy-template.sh DEST NAME [--verify] (see --help)}"
+name="${2:?usage: copy-template.sh DEST NAME [--verify] (see --help)}"
+verify="${3:-}"
+case "$verify" in ""|--verify) ;; *) echo "copy-template.sh: unknown argument $verify (see --help)" >&2; exit 2 ;; esac
+[[ "$name" =~ ^[a-z][a-z0-9]{1,15}$ ]] || { echo "error: NAME must be 2-16 of [a-z0-9], starting with a letter" >&2; exit 2; }
+[ "$name" != starter ] || { echo "error: pick the product's own name" >&2; exit 2; }
+if [ -e "$dest" ] && [ -n "$(ls -A "$dest" 2>/dev/null)" ]; then
+  echo "error: $dest exists and is not empty" >&2
+  exit 2
+fi
+mkdir -p "$dest"
+(cd template && tar --exclude ./target -cf - .) | tar -xf - -C "$dest"
+
+python3 -I - "$dest" "$name" <<'PY'
+import os, re, sys
+dest, name = sys.argv[1], sys.argv[2]
+upper = name.upper()
+rules = [
+    # (?<![A-Za-z0-9]) rather than \b: an underscore before the name (CARGO_BIN_EXE_...)
+    # is a word character, so \b would miss it.
+    (re.compile(r"(?<![A-Za-z0-9])starter(?=[-_](http|db|accounts|server)\b)"), name),
+    (re.compile(r"(?<![A-Za-z0-9])starterctl\b"), f"{name}ctl"),
+    (re.compile(r"\bSTARTER_"), f"{upper}_"),
+    (re.compile(r"\bstarter_(owner|app|test_|probe_|drill_|rehearsal_|control_|session|digest_scratch|install|load_|dev)"), name + r"_\1"),
+    # The unit and the user named in commands (the operator guide, the install test).
+    (re.compile(r"\b(id|nologin|--service|is-active|-u|--value|Environment|stop|restart|enable) starter\b"), r"\1 " + name),
+    (re.compile(r"= starter \]"), f"= {name} ]"),
+    (re.compile(r"__Host-starter_session"), f"__Host-{name}_session"),
+    (re.compile(r"\bstarter\.service\b"), f"{name}.service"),
+    (re.compile(r"\bjournald-starter\.conf\b"), f"journald-{name}.conf"),
+    (re.compile(r"/(opt|etc|var/lib)/starter\b"), r"/\1/" + name),
+    (re.compile(r"^(User|Group|StateDirectory)=starter$", re.M), r"\1=" + name),
+    (re.compile(r'application_name\("starter"\)'), f'application_name("{name}")'),
+    (re.compile(r"@starter>"), f"@{name}>"),
+    (re.compile(r"\bstarter-template\b"), name),
+    (re.compile(r"\bstarter-(owner|app|admin)-dev"), name + r"-\1-dev"),
+    (re.compile(r"POSTGRES_(USER|DB): starter$", re.M), r"POSTGRES_\1: " + name),
+    (re.compile(r"--username=starter --dbname=starter"), f"--username={name} --dbname={name}"),
+    (re.compile(r"postgres://starter:"), f"postgres://{name}:"),
+    (re.compile(r"(127\.0\.0\.1:\$\{port\})/starter\b"), r"\1/" + name),
+    (re.compile(r"\bstarter-(prove|drill|drill-controls|config)\b"), name + r"-\1"),
+]
+changed = 0
+for root, dirs, files in os.walk(dest):
+    dirs[:] = [d for d in dirs if d not in ("target", ".git")]
+    for f in files:
+        path = os.path.join(root, f)
+        try:
+            text = open(path, encoding="utf-8").read()
+        except UnicodeDecodeError:
+            continue
+        new = text
+        for pattern, replacement in rules:
+            new = pattern.sub(replacement, new)
+        if new != text:
+            open(path, "w", encoding="utf-8").write(new)
+            changed += 1
+for crate in ("http", "db", "accounts", "server"):
+    os.rename(os.path.join(dest, "crates", f"starter-{crate}"), os.path.join(dest, "crates", f"{name}-{crate}"))
+for old, new in (
+    ("deploy/starter.service", f"deploy/{name}.service"),
+    ("deploy/journald-starter.conf", f"deploy/journald-{name}.conf"),
+    (f"crates/{name}-server/src/bin/starterctl.rs", f"crates/{name}-server/src/bin/{name}ctl.rs"),
+):
+    os.rename(os.path.join(dest, old), os.path.join(dest, new))
+left = [os.path.join(r, f) for r, ds, fs in os.walk(dest) for f in fs + ds if "starter" in f]
+if left:
+    sys.exit(f"file names the rename missed: {left}")
+print(f"renamed for {name}: {changed} files rewritten")
+PY
+
+commit="$(git rev-parse HEAD)"
+cat >"$dest/TEMPLATE_ORIGIN" <<EOF
+# Where this copy came from. Pull later template changes as a reviewed diff
+# (docs/COPYING.md, "Pulling template changes"):
+#   git -C <backend-platform> diff $commit <newer> -- template/
+template-repository: https://github.com/akira-shirase-oss/backend-platform
+template-commit: $commit
+copied: $(date -u +%Y-%m-%d)
+name: $name
+EOF
+echo "copied template/ at $commit to $dest as $name"
+
+if [ "$verify" = --verify ]; then
+  : "${STARTER_TEST_DATABASE_URL:?set it to an administrator URL to verify the copy}"
+  upper="$(tr '[:lower:]' '[:upper:]' <<<"$name")"
+  (
+    cd "$dest"
+    export CARGO_TARGET_DIR="$PWD/target"
+    export "${upper}_TEST_DATABASE_URL=$STARTER_TEST_DATABASE_URL"
+    cargo clippy --workspace --all-targets --locked -q -- -D warnings
+    cargo test --workspace --locked -q 2>&1 | grep -E 'test result|FAILED|panicked' || true
+    cargo test --workspace --locked -q >/dev/null 2>&1
+  )
+  left="$(grep -rIn --exclude-dir=target -E '(^|[^A-Za-z0-9])starter[-_]|STARTER_|starterctl|(id|nologin|--service|is-active|-u|stop|enable) starter\b' "$dest" | grep -v TEMPLATE_ORIGIN || true)"
+  if [ -n "$left" ]; then
+    echo "error: names the rename missed:" >&2
+    echo "$left" >&2
+    exit 1
+  fi
+  echo "copy verified: it builds, passes clippy and its tests, and no template name is left"
+fi

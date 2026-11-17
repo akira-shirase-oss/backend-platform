@@ -391,6 +391,80 @@ starting values; changing one needs a measurement and a new entry.
   B0 reconciler stays a tested record, not a product. Reopening it follows
   memo §7.
 
+## Decisions made in B1-T (2026-11-17)
+
+- **D-037 — The template is its own workspace, copied by a script.** `template/` is a
+  complete Cargo workspace with its own lockfile, toolchain pin, gate (`scripts/check.sh`),
+  CI file and Dependabot file, so a copy is a working repository the moment it is copied.
+  Its crates are named `starter-*`; `scripts/copy-template.sh DEST NAME` copies it and
+  renames the crates, the operator tool, the `STARTER_` variables, the database roles, the
+  unit and the paths, and writes `TEMPLATE_ORIGIN` with the source commit. `--verify` builds
+  the copy, runs clippy and its tests, and fails on any template name left; CI runs it on
+  every push (`template-copy`). This repository's gate and CI run the template's gate as
+  well (jobs `template` and `template-limits`). Template changes reach a copy only as a
+  reviewed diff (`template/docs/COPYING.md`). Cost: two lockfiles here; Dependabot watches
+  both.
+
+- **D-038 — Connections past the cap wait in the backlog.** The accept loop takes a
+  connection permit *before* `accept`, as Durable Runner (D-045) and Payment Sandbox (D-054)
+  do, not after it with an immediate close, as Accounting Reconciliation does. Past the cap a
+  connection holds no descriptor and is served when a slot frees; every other bound (header
+  read and idle, write stall, requests per connection, lifetime) frees slots. Test:
+  `connections_past_the_cap_wait_in_the_backlog_until_a_slot_frees`. Cost: a client past
+  the cap waits silently instead of seeing a refusal; Caddy's own timeouts bound that wait.
+
+- **D-039 — Sign-in: per address first, global for untrusted pairs, trusted pairs in the
+  database.** Distilled from Service Monitor (per-address refund), Intent Studio (per address,
+  then global; D-052's known address) and Colophon (D-154/D-162):
+  - every attempt takes a token from its address (IPv4, IPv6 /64, a trusted proxy's hop)
+    before the password is compared;
+  - an attempt from a (user, address) pair without a success in 30 days also takes a global
+    token, right before verifying; a refusal there gives the address's token back;
+  - a right password gives every token back, so both budgets count failures;
+  - trusted pairs are rows (`sign_in_trust`), so they survive restarts.
+
+  Tests: `one_address_flood_bounds_only_that_address`,
+  `a_distributed_flood_cannot_lock_out_a_trusted_owner`, `a_right_password_never_runs_out`.
+  Cost: during a distributed flood a new device waits for it to pass. Email-sending routes
+  have their own per-address and global budgets.
+
+- **D-040 — A binary serves only on exactly its own schema; rollback restores.** At startup:
+  the role (exit 3 if it could switch the protections off), then the schema (exit 4 unless
+  the applied migrations are exactly the binary's), then the protections manifest (exit 3).
+  The schema comes before the manifest because another release's schema also changes what
+  the manifest sees, and is the cause to report (`vN` on `vN+1`'s schema was first refused
+  as "unprotected" in the rehearsal). `deploy.sh` refuses to activate a release whose schema
+  is not current; `rollback.sh` refuses while the target binary does not know the schema.
+  Rolling back past a migration means restoring the pre-upgrade snapshot, which loses writes
+  made since the upgrade. An expand-and-contract window (a schema declaring the oldest
+  binary it supports) would avoid that and is not built: a copy adds it when it needs it.
+  Proof: `scripts/upgrade-rehearsal.sh`, 24 steps, in the gate.
+
+- **D-041 — Every limit is proven by removing it.** Each bound carries a `// LIMIT(name)`
+  marker; `scripts/prove-limits.sh` applies one substitution per marker in a scratch copy and
+  requires the named test to fail as a test (a build error is not a proof). A marker without
+  a mutation, or a mutation without its marker, fails the script. 16 limits, all proven
+  locally and in CI (`template-limits`). Cost: a CI job of a few minutes.
+
+- **D-042 — Mail through a loopback SMTP relay; no TLS in the service.** The accounts kit
+  sends through one port (`MailTransport`); the template's adapter speaks plain SMTP to a
+  relay on loopback and refuses any other address, so mail needs no TLS in the service. The
+  relay (Postfix or similar) forwards to the provider over TLS. A product that prefers a
+  provider's HTTP API writes a second adapter. The one TLS stack linked is rustls, for the
+  database client only, because Neon requires TLS (`sqlx`'s `tls-rustls-ring-webpki`;
+  `deny.toml` still bans OpenSSL). It was missing at first: following the operator guide end
+  to end showed a copy could not have reached Neon at all. TLS to Neon is compiled in but not
+  yet exercised (no Neon credentials here). Cost: one more component on the droplet
+  (`template/docs/COMPONENTS.md`).
+
+- **D-043 — The acceptance run is owed, and so are the drills that need credentials.**
+  Item 11 needs a droplet and a hand baseline timed before the template is used; neither
+  exists. A dry run in a scratch copy of Durable Runner ran the journal drill against its own
+  binaries (passed) and recorded what adoption changes (`docs/B1T_ADOPTION.md`). The Neon and
+  bucket drills are written but not run: this repository holds no Neon or bucket
+  credentials. The unit's exposure (1.4) was measured offline and in CI, not on a droplet.
+  B1-T is *In progress* until the acceptance run is committed.
+
 ## Open questions (still open)
 
 These need the maintainer or an outside party; each is in the README's

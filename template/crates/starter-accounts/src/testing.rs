@@ -22,6 +22,17 @@ pub struct Received {
 }
 
 impl Received {
+    /// The first link in the message.
+    pub fn link(&self) -> Option<String> {
+        let at = self.data.find("http")?;
+        Some(
+            self.data[at..]
+                .chars()
+                .take_while(|c| !c.is_whitespace())
+                .collect(),
+        )
+    }
+
     /// The first `token=` value in the message (verification and reset links).
     pub fn token(&self) -> Option<String> {
         let at = self.data.find("token=")? + "token=".len();
@@ -95,8 +106,9 @@ async fn append(path: &std::path::Path, received: &Received) {
     options.create(true).append(true).mode(0o600);
     if let Ok(mut file) = options.open(path).await {
         let line = format!(
-            "to={} token={}\n",
+            "to={} link={} token={}\n",
             received.to,
+            received.link().unwrap_or_default(),
             received.token().unwrap_or_default()
         );
         let _ = file.write_all(line.as_bytes()).await;
