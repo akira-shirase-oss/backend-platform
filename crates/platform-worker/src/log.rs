@@ -20,6 +20,11 @@ pub enum LogError {
     /// Storage failed.
     #[error(transparent)]
     Db(#[from] DbError),
+    /// The control database did not answer before the client-side deadline (F12): a
+    /// half-open connection the server's own timeouts cannot see. Whether the write
+    /// committed is unknown; the next claim reads what was recorded.
+    #[error("the control database did not answer within {0:?}")]
+    Deadline(Duration),
 }
 
 /// Where operations and their recorded steps live.
@@ -48,22 +53,43 @@ pub trait OperationLog: Send + Sync {
     ) -> impl Future<Output = Result<(), LogError>> + Send;
 }
 
-/// The PostgreSQL operation log.
+/// Default client-side deadline on each log call: longer than the pool's acquire timeout
+/// (1 s) plus the server's `statement_timeout` (2 s), so it only fires when neither can.
+pub const DEFAULT_DEADLINE: Duration = Duration::from_secs(5);
+
+/// The PostgreSQL operation log. Every call has a client-side deadline.
 #[derive(Debug, Clone)]
 pub struct PgLog {
     pool: PgPool,
+    deadline: Duration,
 }
 
 impl PgLog {
-    /// Wraps a pool.
+    /// Wraps a pool with [`DEFAULT_DEADLINE`].
     pub fn new(pool: PgPool) -> Self {
-        Self { pool }
+        Self::with_deadline(pool, DEFAULT_DEADLINE)
+    }
+
+    /// Wraps a pool with a specific deadline per call.
+    pub fn with_deadline(pool: PgPool, deadline: Duration) -> Self {
+        Self { pool, deadline }
+    }
+
+    async fn bounded<T>(
+        &self,
+        call: impl Future<Output = Result<T, DbError>>,
+    ) -> Result<T, LogError> {
+        match tokio::time::timeout(self.deadline, call).await {
+            Ok(result) => Ok(result?),
+            Err(_) => Err(LogError::Deadline(self.deadline)),
+        }
     }
 }
 
 impl OperationLog for PgLog {
     async fn claim(&self, worker: Uuid, lease_for: Duration) -> Result<Option<Claimed>, LogError> {
-        Ok(platform_db::log::claim(&self.pool, worker, lease_for).await?)
+        self.bounded(platform_db::log::claim(&self.pool, worker, lease_for))
+            .await
     }
 
     async fn save(
@@ -72,7 +98,12 @@ impl OperationLog for PgLog {
         steps: &[&Step],
         lease_for: Duration,
     ) -> Result<(), LogError> {
-        if platform_db::log::save_steps(&self.pool, lease, steps, lease_for).await? {
+        if self
+            .bounded(platform_db::log::save_steps(
+                &self.pool, lease, steps, lease_for,
+            ))
+            .await?
+        {
             Ok(())
         } else {
             Err(LogError::Fenced)
@@ -85,7 +116,10 @@ impl OperationLog for PgLog {
         state: OperationState,
         steps: &[&Step],
     ) -> Result<(), LogError> {
-        if platform_db::log::finish(&self.pool, lease, state, steps).await? {
+        if self
+            .bounded(platform_db::log::finish(&self.pool, lease, state, steps))
+            .await?
+        {
             Ok(())
         } else {
             Err(LogError::Fenced)

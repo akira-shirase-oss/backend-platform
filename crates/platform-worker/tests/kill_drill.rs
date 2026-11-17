@@ -99,6 +99,7 @@ impl Case {
             .env("BP_WORKER_CONCURRENCY", "1")
             .env("BP_LEASE_MS", LEASE_MS.to_string())
             .env("BP_CALL_TIMEOUT_MS", CALL_TIMEOUT_MS.to_string())
+            .env("BP_DB_CALL_TIMEOUT_MS", "700")
             .env("BP_BACKOFF_BASE_MS", "10")
             .env("BP_BACKOFF_CAP_MS", "50")
             .env("BP_POLL_MAX_MS", "50")

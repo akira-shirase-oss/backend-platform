@@ -45,6 +45,8 @@ pub struct Config {
     pub db_max_connections: u32,
     /// Longest idle poll interval.
     pub poll_idle_max: Duration,
+    /// Client-side deadline on each operation-log call (F12).
+    pub db_call_timeout: Duration,
     /// Deadlines and budgets.
     pub reconcile: ReconcileConfig,
     /// How long shutdown waits for in-progress rounds.
@@ -119,6 +121,11 @@ impl Config {
             concurrency,
             db_max_connections,
             poll_idle_max: Duration::from_millis(number("BP_POLL_MAX_MS", 200, &mut errors)),
+            db_call_timeout: Duration::from_millis(number(
+                "BP_DB_CALL_TIMEOUT_MS",
+                5_000,
+                &mut errors,
+            )),
             reconcile,
             shutdown_grace: Duration::from_millis(number(
                 "BP_SHUTDOWN_GRACE_MS",
@@ -128,6 +135,13 @@ impl Config {
             log_filter: var("BP_LOG").unwrap_or_else(|| "info".to_owned()),
             log_format,
         };
+        if config.db_call_timeout.is_zero()
+            || config.db_call_timeout.saturating_mul(2) > config.reconcile.lease
+        {
+            errors.push(
+                "BP_DB_CALL_TIMEOUT_MS must be positive and at most half of BP_LEASE_MS".to_owned(),
+            );
+        }
         if errors.is_empty() {
             Ok(config)
         } else {

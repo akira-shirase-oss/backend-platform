@@ -50,7 +50,7 @@ async fn main() -> anyhow::Result<()> {
     };
     tracing::info!(worker = %worker.id, concurrency = worker.concurrency, "worker starting");
     let cancel = CancellationToken::new();
-    let log = Arc::new(PgLog::new(pool.clone()));
+    let log = Arc::new(PgLog::with_deadline(pool.clone(), config.db_call_timeout));
     let provider = Arc::new(provider);
     let running = tokio::spawn(start(log, provider, worker, cancel.clone()));
 
