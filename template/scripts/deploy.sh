@@ -80,6 +80,10 @@ if [ -n "$ready" ]; then
     sleep 0.5
   done
   echo "deploy: $release did not become ready; roll back with scripts/rollback.sh --prefix $prefix" >&2
+  if [ -n "$service" ]; then
+    echo "deploy: the last lines of $service's log:" >&2
+    journalctl -u "$service" -n 25 --no-pager -o cat >&2 || true
+  fi
   exit 1
 fi
 echo "deploy: done ($(( $(date +%s) - started )) s)"

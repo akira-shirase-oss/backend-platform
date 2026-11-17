@@ -73,6 +73,11 @@ if command -v cargo-deny >/dev/null 2>&1; then
 else
   echo "note: cargo-deny not installed; supply-chain check skipped locally (CI runs it)"
 fi
+# B1-T's evidence under perf/results names no host, user or home path (the template's check).
+shopt -s nullglob
+b1t=(perf/results/*-b1t-*.json)
+if (( ${#b1t[@]} )); then template/scripts/check-results.sh "${b1t[@]/#/../}"; fi
+shopt -u nullglob
 # The starter template (B1-T): its own workspace and gate, run on this stack's PostgreSQL
 # (its roles are starter_*, so it never touches this repository's databases). CI runs it as
 # its own job on the template's own stack.

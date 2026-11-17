@@ -5,7 +5,8 @@
 //! secret named `x` is read from the systemd credential `$CREDENTIALS_DIRECTORY/x`
 //! (`LoadCredential=` in the unit), else from the file named by `STARTER_X_FILE`, else —
 //! for development only — from `STARTER_X`. A secret file must be a regular file of at
-//! most 4 KiB that nobody but its owner can read (mode `0600` or `0400`).
+//! most 4 KiB; one named by `_FILE` must also be readable by its owner only (mode `0600` or
+//! `0400`). systemd's credential directory is private to the service already.
 //!
 //! Loading reads files, so it runs before the async runtime starts.
 
@@ -269,16 +270,18 @@ pub fn secret(
     if let Some(dir) = source.var("CREDENTIALS_DIRECTORY") {
         let path = Path::new(&dir).join(credential);
         if path.exists() {
-            return read_secret_file(&path).map(Some);
+            // systemd made this directory for this service alone; how it sets each file's
+            // owner and mode varies by version, so the mode is not ours to check here.
+            return read_secret_file(&path, false).map(Some);
         }
     }
     if let Some(file) = source.var(&format!("{variable}_FILE")) {
-        return read_secret_file(&PathBuf::from(file)).map(Some);
+        return read_secret_file(&PathBuf::from(file), true).map(Some);
     }
     Ok(source.var(variable).map(Secret))
 }
 
-fn read_secret_file(path: &Path) -> Result<Secret, String> {
+fn read_secret_file(path: &Path, owner_only: bool) -> Result<Secret, String> {
     let shown = path
         .file_name()
         .map_or_else(String::new, |n| n.to_string_lossy().into_owned());
@@ -288,7 +291,7 @@ fn read_secret_file(path: &Path) -> Result<Secret, String> {
             "secret file {shown} must be a regular file of at most 4 KiB"
         ));
     }
-    if meta.permissions().mode() & 0o077 != 0 {
+    if owner_only && meta.permissions().mode() & 0o077 != 0 {
         return Err(format!(
             "secret file {shown} is readable by others (mode {:o}); chmod 600 it",
             meta.mode() & 0o777
@@ -526,17 +529,28 @@ mod tests {
         let file = dir.join("database-url");
         std::fs::write(&file, "postgres://starter_app:from-file@127.0.0.1/app\n").unwrap();
         std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o644)).unwrap();
+        let file_text = file.to_string_lossy().into_owned();
         let dir_text = dir.to_string_lossy().into_owned();
-        let source = BTreeMap::from([("CREDENTIALS_DIRECTORY", dir_text.as_str())]);
-        let open = Config::load(&source).unwrap_err();
+        // A _FILE path must be owner-only...
+        let by_path = BTreeMap::from([("STARTER_DATABASE_URL_FILE", file_text.as_str())]);
+        let open = Config::load(&by_path).unwrap_err();
         assert!(
             open.iter().any(|p| p.contains("readable by others")),
             "{open:?}"
         );
         std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o600)).unwrap();
-        let config = Config::load(&source).unwrap();
         assert_eq!(
-            config.database_url.expose(),
+            Config::load(&by_path).unwrap().database_url.expose(),
+            "postgres://starter_app:from-file@127.0.0.1/app"
+        );
+        // ...while systemd's credential directory is systemd's to protect, and wins.
+        std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o440)).unwrap();
+        let credential = BTreeMap::from([
+            ("CREDENTIALS_DIRECTORY", dir_text.as_str()),
+            ("STARTER_DATABASE_URL", "postgres://ignored@127.0.0.1/app"),
+        ]);
+        assert_eq!(
+            Config::load(&credential).unwrap().database_url.expose(),
             "postgres://starter_app:from-file@127.0.0.1/app"
         );
         std::fs::remove_dir_all(&dir).unwrap();

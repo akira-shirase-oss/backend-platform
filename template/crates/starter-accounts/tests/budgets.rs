@@ -5,9 +5,30 @@
 
 mod common;
 
+use std::time::Duration;
+
 use axum::http::{Method, StatusCode};
 use common::{Auth, Kit, PASSWORD};
 use serde_json::json;
+use starter_accounts::signin::{MailRates, SignInRates};
+use starter_http::budget::Rate;
+
+/// The default bursts, with refills slow enough that no token comes back during a test
+/// however slow the machine (the counts below would otherwise depend on wall time).
+async fn kit() -> Kit {
+    Kit::with(|s| {
+        s.sign_in = SignInRates {
+            per_address: Rate::new(5, Duration::from_secs(3600)),
+            global: Rate::new(20, Duration::from_secs(3600)),
+            ..SignInRates::default()
+        };
+        s.mail = MailRates {
+            per_address: Rate::new(3, Duration::from_secs(3600)),
+            global: Rate::new(30, Duration::from_secs(3600)),
+        };
+    })
+    .await
+}
 
 fn wrong(email: &str) -> serde_json::Value {
     json!({ "email": email, "password": "not the password at all" })
@@ -15,7 +36,7 @@ fn wrong(email: &str) -> serde_json::Value {
 
 #[tokio::test]
 async fn one_address_flood_bounds_only_that_address() {
-    let kit = Kit::new().await;
+    let kit = kit().await;
     kit.verified_user("owner@example.test").await;
     let mut evaluated = 0;
     let mut refused = 0;
@@ -53,7 +74,7 @@ async fn one_address_flood_bounds_only_that_address() {
 
 #[tokio::test]
 async fn a_distributed_flood_cannot_lock_out_a_trusted_owner() {
-    let kit = Kit::new().await;
+    let kit = kit().await;
     kit.verified_user("owner@example.test").await;
     // The owner's usual place becomes trusted by signing in once.
     kit.session("203.0.113.10:5000", "owner@example.test").await;
@@ -103,7 +124,7 @@ async fn a_distributed_flood_cannot_lock_out_a_trusted_owner() {
 
 #[tokio::test]
 async fn a_right_password_never_runs_out() {
-    let kit = Kit::new().await;
+    let kit = kit().await;
     kit.verified_user("owner@example.test").await;
     for _ in 0..12 {
         kit.session("203.0.113.10:5000", "owner@example.test").await;
@@ -113,7 +134,7 @@ async fn a_right_password_never_runs_out() {
 
 #[tokio::test]
 async fn mail_a_client_can_cause_is_bounded() {
-    let kit = Kit::new().await;
+    let kit = kit().await;
     let answers: Vec<StatusCode> = {
         let mut out = Vec::new();
         for _ in 0..6 {

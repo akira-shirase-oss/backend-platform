@@ -38,13 +38,14 @@ rules = [
     # is a word character, so \b would miss it.
     (re.compile(r"(?<![A-Za-z0-9])starter(?=[-_](http|db|accounts|server)\b)"), name),
     (re.compile(r"(?<![A-Za-z0-9])starterctl\b"), f"{name}ctl"),
-    (re.compile(r"\bSTARTER_"), f"{upper}_"),
+    (re.compile(r"(?<![A-Z0-9])STARTER_"), f"{upper}_"),
     (re.compile(r"\bstarter_(owner|app|test_|probe_|drill_|rehearsal_|control_|session|digest_scratch|install|load_|dev)"), name + r"_\1"),
     # The unit and the user named in commands (the operator guide, the install test).
-    (re.compile(r"\b(id|nologin|--service|is-active|-u|--value|Environment|stop|restart|enable) starter\b"), r"\1 " + name),
+    (re.compile(r"(^|(?<=[\s(/]))(id|nologin|--service|is-active|-u|--value|Environment|stop|restart|enable) starter\b", re.M), r"\2 " + name),
     (re.compile(r"= starter \]"), f"= {name} ]"),
     (re.compile(r"__Host-starter_session"), f"__Host-{name}_session"),
     (re.compile(r"\bstarter\.service\b"), f"{name}.service"),
+    (re.compile(r"/starter\.conf\b"), f"/{name}.conf"),
     (re.compile(r"\bjournald-starter\.conf\b"), f"journald-{name}.conf"),
     (re.compile(r"/(opt|etc|var/lib)/starter\b"), r"/\1/" + name),
     (re.compile(r"^(User|Group|StateDirectory)=starter$", re.M), r"\1=" + name),
@@ -56,7 +57,7 @@ rules = [
     (re.compile(r"--username=starter --dbname=starter"), f"--username={name} --dbname={name}"),
     (re.compile(r"postgres://starter:"), f"postgres://{name}:"),
     (re.compile(r"(127\.0\.0\.1:\$\{port\})/starter\b"), r"\1/" + name),
-    (re.compile(r"\bstarter-(prove|drill|drill-controls|config)\b"), name + r"-\1"),
+    (re.compile(r"\bstarter-(prove|drill|drill-controls|config|load|copy)\b"), name + r"-\1"),
 ]
 changed = 0
 for root, dirs, files in os.walk(dest):
@@ -110,7 +111,7 @@ if [ "$verify" = --verify ]; then
     cargo test --workspace --locked -q 2>&1 | grep -E 'test result|FAILED|panicked' || true
     cargo test --workspace --locked -q >/dev/null 2>&1
   )
-  left="$(grep -rIn --exclude-dir=target -E '(^|[^A-Za-z0-9])starter[-_]|STARTER_|starterctl|(id|nologin|--service|is-active|-u|stop|enable) starter\b' "$dest" | grep -v TEMPLATE_ORIGIN || true)"
+  left="$(grep -rIn --exclude-dir=target -E '(^|[^A-Za-z0-9])starter[-_]|(^|[^A-Z0-9])STARTER_|starterctl|(id|nologin|--service|is-active|-u|--value|stop|enable) starter\b' "$dest" | grep -v TEMPLATE_ORIGIN || true)"
   if [ -n "$left" ]; then
     echo "error: names the rename missed:" >&2
     echo "$left" >&2

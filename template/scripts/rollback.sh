@@ -45,5 +45,9 @@ if [ -n "$ready" ]; then
     sleep 0.5
   done
   echo "rollback: $to did not become ready" >&2
+  if [ -n "$service" ]; then
+    echo "rollback: the last lines of $service's log:" >&2
+    journalctl -u "$service" -n 25 --no-pager -o cat >&2 || true
+  fi
   exit 1
 fi

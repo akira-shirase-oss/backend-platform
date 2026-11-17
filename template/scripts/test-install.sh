@@ -26,6 +26,17 @@ cd "$(dirname "$0")/.."
   exit 2
 }
 
+# On any failure, show what the services said.
+on_exit() {
+  local status=$?
+  if [ "$status" -ne 0 ]; then
+    echo "test-install.sh: failed (exit $status); the services' state and logs:" >&2
+    systemctl --no-pager status starter caddy >&2 || true
+    journalctl -u starter -u caddy -n 60 --no-pager -o short-iso >&2 || true
+  fi
+}
+trap on_exit EXIT
+
 block() { # name -> the guide's block, as written
   awk -v b="<!-- operator:$1 -->" -v e="<!-- /operator:$1 -->" '$0 == b {inside = 1; next} $0 == e {inside = 0} inside' docs/OPERATIONS.md \
     | sed '/^```/d'
