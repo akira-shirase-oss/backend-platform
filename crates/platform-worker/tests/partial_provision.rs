@@ -205,6 +205,7 @@ async fn run_schedule(seed: u64, mode: Mode, totals: &mut Totals) -> Result<(), 
         faults,
         unique_names: mode == Mode::Unique,
         honor_idempotency_keys: mode == Mode::Keys,
+        ..FakeOptions::default()
     });
     // Sometimes an earlier, forgotten operation already made one of the resources.
     let mut seeded = 0;

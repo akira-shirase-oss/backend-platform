@@ -56,6 +56,7 @@ async fn main() -> anyhow::Result<()> {
             rules: Vec::new(),
             random,
         },
+        latency: Duration::ZERO,
     }));
     let listener = tokio::net::TcpListener::bind(listen)
         .await

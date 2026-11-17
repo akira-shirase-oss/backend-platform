@@ -273,7 +273,14 @@ starting values; changing one needs a measurement and a new entry.
     exercise `AlreadyExists` → look up → adopt (more than 100 answers);
   - the real worker binary on PostgreSQL against plain and unique-name
     providers: killed with SIGKILL at every step and fault point, plus
-    every provider fault against every kind, and a late create per kind.
+    every provider fault against every kind, and a late create per kind;
+  - concurrency (review F14, `tests/concurrent_drill.rs`): three workers of
+    four tasks each, on one PostgreSQL log, with 40 projects of three
+    operations each, 3 ms of provider latency and 8% faults. The fake's
+    `latency` option makes calls really overlap. Pass: every operation
+    succeeds and the provider holds exactly the plan. With the per-project
+    claim order removed it fails with duplicated names, because two
+    operations of one project carry different idempotency keys.
 
   A blind-retry reconciler is caught by the same oracle (the drill can
   fail). Cost: the fake is not a real provider; B2 repeats the drill

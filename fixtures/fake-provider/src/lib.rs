@@ -17,7 +17,6 @@
 //!   call returns `Timeout` at once; over HTTP the reply is held past the caller's deadline.
 
 use std::collections::HashMap;
-use std::future::Future;
 use std::sync::{Mutex, MutexGuard};
 use std::time::Duration;
 
@@ -276,6 +275,7 @@ pub struct Reply<T> {
 #[derive(Debug)]
 pub struct FakeProvider {
     state: Mutex<State>,
+    latency: Duration,
 }
 
 /// How the fake starts.
@@ -290,6 +290,9 @@ pub struct FakeOptions {
     pub record_calls: bool,
     /// The initial faults.
     pub faults: FaultConfig,
+    /// Delay of every in-process call (zero: answer at once). With a delay, concurrent
+    /// workers really overlap, as they would against a real provider.
+    pub latency: Duration,
 }
 
 impl FakeProvider {
@@ -313,6 +316,7 @@ impl FakeProvider {
         apply_faults(&mut state, options.faults);
         Self {
             state: Mutex::new(state),
+            latency: options.latency,
         }
     }
 
@@ -598,19 +602,22 @@ fn next_id(state: &mut State, kind: ResourceKind) -> ProviderResourceId {
 /// The in-process form: a hang returns `Timeout` at once (the caller's deadline is
 /// simulated); the effect has already been applied.
 impl Provider for FakeProvider {
-    fn lookup(
+    async fn lookup(
         &self,
         kind: ResourceKind,
         name: &ProviderName,
-    ) -> impl Future<Output = Result<Observation, ProviderError>> + Send {
-        std::future::ready(self.lookup_now(kind, name).result)
+    ) -> Result<Observation, ProviderError> {
+        if !self.latency.is_zero() {
+            tokio::time::sleep(self.latency).await;
+        }
+        self.lookup_now(kind, name).result
     }
 
-    fn create(
-        &self,
-        request: &CreateRequest,
-    ) -> impl Future<Output = Result<ProviderResourceId, ProviderError>> + Send {
-        std::future::ready(self.create_now(request).result)
+    async fn create(&self, request: &CreateRequest) -> Result<ProviderResourceId, ProviderError> {
+        if !self.latency.is_zero() {
+            tokio::time::sleep(self.latency).await;
+        }
+        self.create_now(request).result
     }
 }
 
