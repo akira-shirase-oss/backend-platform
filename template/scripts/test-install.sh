@@ -49,7 +49,9 @@ run_block() { # name
   bash -euo pipefail -c "$text"
 }
 check() { # what cmd...
-  if "$@"; then echo "  ok    $1"; else echo "  FAIL  $1" >&2; exit 1; fi
+  local what="$1"
+  shift
+  if "$@"; then echo "  ok    $what"; else echo "  FAIL  $what" >&2; exit 1; fi
 }
 
 # What the guide asks the operator to set. Stand-ins for a droplet: the database is the
