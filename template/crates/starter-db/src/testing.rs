@@ -10,10 +10,9 @@
     reason = "test support: a setup failure must abort the test with its cause"
 )]
 
-use std::str::FromStr;
 use std::time::Duration;
 
-use sqlx::postgres::{PgConnectOptions, PgPool, PgPoolOptions};
+use sqlx::postgres::{PgPool, PgPoolOptions};
 use sqlx::{AssertSqlSafe, ConnectOptions, Connection, Executor};
 use uuid::Uuid;
 
@@ -75,7 +74,8 @@ impl TestDb {
             .expect("bootstrapping the test database and roles");
         let db = Self {
             pool: PgPoolOptions::new().connect_lazy_with(
-                PgConnectOptions::from_str(&admin_url).expect("invariant: the admin URL parses"),
+                crate::pool::parse_url(&admin_url)
+                    .expect("the test administrator's URL parses and is safe"),
             ),
             admin_url,
             name,
@@ -142,8 +142,8 @@ impl TestDb {
     /// Drops the database, forcing out any connection a test or a child left behind.
     pub async fn cleanup(self) {
         let _ = tokio::time::timeout(Duration::from_secs(2), self.pool.close()).await;
-        if let Ok(mut admin) = PgConnectOptions::from_str(&self.admin_url)
-            .expect("invariant: the admin URL parses")
+        if let Ok(mut admin) = crate::pool::parse_url(&self.admin_url)
+            .expect("invariant: the admin URL parsed in TestDb::unmigrated")
             .connect()
             .await
         {

@@ -12,6 +12,9 @@ pub enum DbError {
     /// A value refused before it reached the database.
     #[error("invalid: {0}")]
     Invalid(String),
+    /// A database URL refused before connecting: its TLS would not authenticate the server.
+    #[error(transparent)]
+    Transport(#[from] TransportError),
     /// Anything else.
     #[error("database error")]
     Other(#[source] sqlx::Error),
@@ -60,6 +63,39 @@ pub fn chain(error: &dyn std::error::Error) -> String {
         source = cause.source();
     }
     text
+}
+
+/// Why a database URL was refused before any connection was made ([`crate::pool::parse_url`]).
+///
+/// In sqlx 0.9, `sslmode=require` (and `prefer`, the default) encrypt without checking the
+/// server's certificate or name, so anyone on the path can read or relay the session; and
+/// `verify-ca` checks the chain against the public roots as well as any `sslrootcert`, so
+/// any publicly trusted certificate passes. Only `verify-full` authenticates the server.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
+pub enum TransportError {
+    /// A host other than loopback without `sslmode=verify-full`.
+    #[error(
+        "the database URL reaches a host other than loopback with sslmode={mode}, which does not \
+         authenticate the server: add sslmode=verify-full to the URL (for Neon, \
+         `?sslmode=verify-full`; the public roots are built in)"
+    )]
+    Unverified {
+        /// The mode the URL (or `PGSSLMODE`) asked for.
+        mode: &'static str,
+    },
+    /// `sslmode=verify-ca` to a host other than loopback.
+    #[error(
+        "the database URL reaches a host other than loopback with sslmode=verify-ca, which this \
+         client checks against the public roots too, so any public certificate passes: use \
+         sslmode=verify-full"
+    )]
+    VerifyCa,
+    /// `channel_binding=require`, which sqlx does not implement and would silently ignore.
+    #[error(
+        "the database URL asks for channel_binding=require, which this client does not \
+         implement and would ignore: remove it (sslmode=verify-full authenticates the server)"
+    )]
+    ChannelBinding,
 }
 
 /// True for a unique-constraint violation (SQLSTATE 23505).

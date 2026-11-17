@@ -13,9 +13,6 @@
 //! of `neon_superuser`), which may create roles; the attributes it cannot grant are the
 //! ones the runtime role must not have anyway.
 
-use std::str::FromStr;
-
-use sqlx::postgres::PgConnectOptions;
 use sqlx::{AssertSqlSafe, ConnectOptions, Connection, Executor};
 
 use crate::DbError;
@@ -63,8 +60,7 @@ pub async fn bootstrap(
     }
     // The ALTER ROLE statements carry both passwords and sqlx logs statements (DEBUG, and
     // WARN when slow), so this connection logs none.
-    let mut admin = PgConnectOptions::from_str(admin_url)
-        .map_err(DbError::Other)?
+    let mut admin = crate::pool::parse_url(admin_url)?
         .disable_statement_logging()
         .connect()
         .await?;
@@ -138,10 +134,7 @@ pub async fn drop_database(admin_url: &str, database: &str) -> Result<(), DbErro
             "database name {database:?} is not a plain identifier"
         )));
     }
-    let mut admin = PgConnectOptions::from_str(admin_url)
-        .map_err(DbError::Other)?
-        .connect()
-        .await?;
+    let mut admin = crate::pool::parse_url(admin_url)?.connect().await?;
     admin
         .execute(AssertSqlSafe(format!(
             "DROP DATABASE IF EXISTS {database} WITH (FORCE)"

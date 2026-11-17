@@ -324,6 +324,16 @@ impl Config {
                 Secret(String::new())
             }
         };
+        if !database_url.expose().is_empty() {
+            match starter_db::parse_url(database_url.expose()) {
+                Ok(_) => {}
+                Err(starter_db::DbError::Transport(refusal)) => p.0.push(refusal.to_string()),
+                Err(_) => p.0.push(
+                    "the database URL does not parse: postgres://user:password@host[:port]/db[?sslmode=verify-full]"
+                        .to_owned(),
+                ),
+            }
+        }
         let listen = source
             .var("STARTER_LISTEN")
             .unwrap_or_else(|| default_of("STARTER_LISTEN").to_owned())
@@ -519,6 +529,45 @@ mod tests {
             );
         }
         assert!(problems.iter().all(|p| !p.contains("pw@")));
+    }
+
+    /// TLS that does not check the server's certificate and name (`require`, `prefer`,
+    /// `verify-ca`, which this client also checks against the public roots) is refused for
+    /// any database off loopback, before anything connects, with the fix named.
+    #[test]
+    fn a_database_off_loopback_needs_verify_full() {
+        for mode in [
+            "",
+            "?sslmode=require",
+            "?sslmode=prefer",
+            "?sslmode=verify-ca",
+        ] {
+            let url = format!("postgres://starter_app:pw@db.example.com:5432/app{mode}");
+            let source = BTreeMap::from([("STARTER_DATABASE_URL", url.as_str())]);
+            let problems = Config::load(&source).unwrap_err();
+            assert!(
+                problems.iter().any(|p| p.contains("sslmode=verify-full")),
+                "{url}: {problems:?}"
+            );
+            assert!(problems.iter().all(|p| !p.contains("pw@")), "{problems:?}");
+        }
+        for url in [
+            "postgres://starter_app:pw@db.example.com:5432/app?sslmode=verify-full",
+            "postgres://starter_app:pw@127.0.0.1:61432/app",
+            "postgres://starter_app:pw@localhost/app?sslmode=disable",
+            "postgres://starter_app:pw@[::1]:5432/app",
+            "postgres:///app?user=starter_app&host=/run/postgresql",
+        ] {
+            let source = BTreeMap::from([("STARTER_DATABASE_URL", url)]);
+            assert!(Config::load(&source).is_ok(), "{url} was refused");
+        }
+        // Neon's connection strings carry channel_binding=require, which the client ignores.
+        let neon = "postgres://u:pw@ep-x.neon.tech/app?sslmode=verify-full&channel_binding=require";
+        let problems = Config::load(&BTreeMap::from([("STARTER_DATABASE_URL", neon)])).unwrap_err();
+        assert!(
+            problems.iter().any(|p| p.contains("channel_binding")),
+            "{problems:?}"
+        );
     }
 
     #[test]

@@ -25,8 +25,8 @@ pub mod schema;
 #[cfg(feature = "test-support")]
 pub mod testing;
 
-pub use error::{DbError, chain, is_unique_violation};
-pub use pool::{PoolSettings, connect_lazy, connect_options};
+pub use error::{DbError, TransportError, chain, is_unique_violation};
+pub use pool::{PoolSettings, check_transport, connect_lazy, connect_options, parse_url};
 
 /// The embedded migrations (forward-only; never edit one that has shipped).
 pub static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("../../migrations");
