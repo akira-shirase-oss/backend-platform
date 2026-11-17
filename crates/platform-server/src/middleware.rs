@@ -20,7 +20,7 @@ use tower_http::request_id::{
 };
 use tower_http::sensitive_headers::SetSensitiveRequestHeadersLayer;
 use tower_http::timeout::TimeoutLayer;
-use tower_http::trace::{DefaultOnResponse, TraceLayer};
+use tower_http::trace::{DefaultOnFailure, DefaultOnResponse, TraceLayer};
 use tracing::{Level, Span};
 
 use crate::config::Config;
@@ -182,7 +182,10 @@ pub fn apply(router: Router, config: &Config) -> Router {
                     DefaultOnResponse::new()
                         .level(Level::DEBUG)
                         .latency_unit(LatencyUnit::Micros),
-                ),
+                )
+                // Each error is logged once, where it is handled (crate::error); an ERROR
+                // line per shed request would turn overload into a log storm.
+                .on_failure(DefaultOnFailure::new().level(Level::DEBUG)),
         )
         // 5. One error envelope for everything below.
         .layer(axum_mw::from_fn(error_envelope))

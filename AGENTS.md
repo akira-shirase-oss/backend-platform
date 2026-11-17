@@ -7,8 +7,10 @@ never rewritten infrastructure. Contract: the engineering guide
 `09_Backend_Platform.docx` (kept in the maintainer's workspace under
 `docs/Project_Guides/`, not in this repository) — the guide wins on any
 conflict. Status: **parked (future horizon); B0 in progress** at the maintainer's
-request (2026-11-16). Nothing past B0 starts until the maintainer unparks
-the project and accepts the B0 memo.
+request (2026-11-16): built and green, with a quiet-machine load baseline,
+the 1,000,000-request run and the maintainer's decision on the memo still
+owed. The memo (`docs/B0_MEMO.md`) recommends staying parked. Nothing past
+B0 starts until the maintainer unparks the project.
 
 ## Read first
 
@@ -88,12 +90,28 @@ is added.
 
 ## Verification (CI from the first B0 commit)
 
-`scripts/check.sh` runs what CI runs: toolchain, fmt, clippy
-`-D warnings`, tests, `cargo deny`, the architecture checks
-(`platform-domain` has no I/O; `platform-server` does not depend on
-`platform-adapters`; the console imports no database client), then the
-drills and the load smoke of every finished milestone. Run it before every
-push.
+`scripts/check.sh` runs what CI runs:
+
+- toolchain, fmt, clippy `-D warnings` (also on the fault-injection build);
+- the architecture checks: `platform-domain` has no I/O; `platform-server`
+  links no adapter, worker or fake provider and reads no `BP_PROVIDER*`
+  setting; once the console exists, it imports no database client;
+- the pin check (`scripts/check-pins.sh`, T8);
+- tests against PostgreSQL;
+- drill `partial-provision` (in process, plus the `kill_drill` test on the
+  `fault-injection` build);
+- a short load probe;
+- `cargo deny`.
+
+Each check is shown able to fail. Run it before every push; check the exit
+code and never pipe it through `grep`.
+
+Local stack: `scripts/stack.sh up` (compose project `backend-platform`,
+PostgreSQL on 127.0.0.1:61432; the platform's own processes use
+61400–61499: server 61400, fake provider 61410). Load runs:
+`MODE=smoke|full scripts/load.sh`. A full run is taken only when `uptime`
+shows a load average below about 6; every result records the machine, the
+commit and the load.
 
 ## Working rules
 

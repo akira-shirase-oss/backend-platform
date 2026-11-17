@@ -66,7 +66,7 @@ BP_DATABASE_URL="$db_url" BP_PROVIDER_URL="http://127.0.0.1:${fake_port}" BP_WOR
 worker=$!
 
 set +e
-BASE_URL="http://127.0.0.1:${server_port}" TOKEN="$token" MODE="$mode" RATE="$rate" PROJECTS="$projects" TOTAL="${TOTAL:-}" \
+BASE_URL="http://127.0.0.1:${server_port}" TOKEN="$token" MODE="$mode" RATE="$rate" PROJECTS="$projects" TOTAL="${TOTAL:-}" WRITE_RATIO="${WRITE_RATIO:-}" \
   k6 run --quiet --summary-export "$summary" perf/scenarios/control-api.js
 k6_status=$?
 set -e

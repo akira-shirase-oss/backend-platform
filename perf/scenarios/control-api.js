@@ -4,7 +4,8 @@
 // While it runs, the worker reconciles every operation against the fault-injecting fake
 // provider; scripts/load.sh then checks the provider side: zero duplicates.
 //
-// Env: BASE_URL, TOKEN, MODE (smoke | full), RATE (requests/s), PROJECTS, TOTAL (probes only).
+// Env: BASE_URL, TOKEN, MODE (smoke | full), RATE (requests/s), PROJECTS; TOTAL and
+// WRITE_RATIO for diagnostic probes only (never in perf/results).
 import http from 'k6/http';
 import { check, fail } from 'k6';
 import { Counter, Rate } from 'k6/metrics';
@@ -14,6 +15,8 @@ const RATE = parseInt(__ENV.RATE || '2000', 10);
 // TOTAL overrides the count only for plumbing probes (scripts/load.sh keeps those out of perf/results).
 const TOTAL = __ENV.TOTAL ? parseInt(__ENV.TOTAL, 10) : MODE === 'full' ? 1000000 : 100000;
 const PROJECTS = parseInt(__ENV.PROJECTS || '2000', 10);
+// The D-018 mix is 20% writes; WRITE_RATIO changes it only for diagnostic probes.
+const WRITE_RATIO = __ENV.TOTAL && __ENV.WRITE_RATIO ? parseFloat(__ENV.WRITE_RATIO) : 0.2;
 const BASE = __ENV.BASE_URL;
 const AUTH = { headers: { Authorization: `Bearer ${__ENV.TOKEN}`, 'Content-Type': 'application/json' } };
 const DESIRED = JSON.stringify({ databases: ['main'], buckets: ['files'], identity: { clients: ['web'] } });
@@ -77,13 +80,13 @@ export function setup() {
 
 export default function (data) {
   const roll = Math.random();
-  if (roll < 0.2) {
+  if (roll < WRITE_RATIO) {
     const p = project(Math.floor(Math.random() * PROJECTS));
     const r = http.put(`${BASE}/v1/projects/${p}/desired`, DESIRED, Object.assign({ tags: { kind: 'write', name: 'PUT desired' } }, AUTH));
     refused.add(r.status === 429);
     if (r.status !== 202 && r.status !== 429) unexpected.add(1);
     check(r, { 'write admitted or refused by admission': (x) => x.status === 202 || x.status === 429 });
-  } else if (roll < 0.9) {
+  } else if (roll < WRITE_RATIO + (1 - WRITE_RATIO) * 0.875) {
     const id = data.ids[Math.floor(Math.random() * data.ids.length)];
     const r = http.get(`${BASE}/v1/operations/${id}`, Object.assign({ tags: { kind: 'read', name: 'GET operation' } }, AUTH));
     if (r.status !== 200) unexpected.add(1);

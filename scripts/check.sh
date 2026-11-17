@@ -27,6 +27,18 @@ if cargo metadata --locked --format-version 1 --no-deps | grep -q '"name":"platf
 fi
 echo "architecture check proven able to fail"
 
+scripts/check-pins.sh
+# The pin check must be able to fail too.
+unpinned="$(mktemp)"
+printf 'services:\n  db:\n    image: postgres:18\nsteps:\n  - uses: actions/checkout@v7\n' >"$unpinned"
+if scripts/check-pins.sh "$unpinned" >/dev/null 2>&1; then
+  echo "error: the pin check did not catch an unpinned image and action" >&2
+  rm -f "$unpinned"
+  exit 1
+fi
+rm -f "$unpinned"
+echo "pin check proven able to fail"
+
 if [ -z "${BP_TEST_DATABASE_URL:-}" ]; then
   scripts/stack.sh up >/dev/null
   eval "$(scripts/stack.sh env)"

@@ -147,8 +147,10 @@ starting values; changing one needs a measurement and a new entry.
   laptop workload, and no hosted third-party service is ever load-tested.
   This replaces "provisioning runs" as a million-scale unit.
 - **D-019 — First OIDC provider: Keycloak, one realm per project.** It is
-  mature, self-hosted, OpenID Certified and has an admin API that the
-  worker can drive. The review bar is our own negative tests (exact
+  mature, self-hosted and has an admin API that the worker can drive. (As
+  of 2026-11-16 the newest OpenID Foundation certification listing found is
+  for Keycloak 18.0.0, dated 2022-05-19; certification of the 26.x line is
+  unverified — B0 memo §6.) The review bar is our own negative tests (exact
   redirect-URI match, PKCE required for public clients, issuer and audience
   checks, token lifetimes) plus a pinned supported release with its
   advisories tracked. Its idle footprint is measured at B2; if it breaks the
@@ -210,6 +212,60 @@ starting values; changing one needs a measurement and a new entry.
   team completes every operation, the median total time beats the
   baseline, and each recovery operation is individually faster. B5's
   second developer is the rehearsal, not a substitute.
+
+## Decisions made in B0 (2026-11-16)
+
+- **D-029 — The reconciler's write protocol.** An attempt is committed
+  before any provider call (with the previous step's result, in the same
+  statement), and its result is committed with the next step's begin or
+  with the finish. Every write is one SQL statement that checks the lease's
+  fencing token, renews the lease, updates the steps, appends the events
+  and upserts observed resources. Operations of one project are claimed one
+  at a time, oldest first. Reason: intent before effect, at one round trip
+  per step; a crash after a create costs one lookup and an adoption, never
+  a duplicate. Cost: a crash can lose one recorded result, which the next
+  attempt re-observes. Residual risk: a worker paused past its lease while a
+  create is in flight could race its successor. Real providers' name
+  uniqueness (`CREATE DATABASE`, bucket names, realm names) is the
+  backstop, and it is why D-016's deterministic names matter. The drill
+  kills workers; it does not pause them.
+- **D-030 — The fake provider allows duplicate names.** By default, a
+  create always makes a new resource with a fresh id. So the
+  partial-provisioning drill measures the reconciler, not the provider: a
+  blind retry shows up as a duplicate, counted on the provider side. A
+  unique-names mode exists for the `AlreadyExists` path. The drill has two
+  halves:
+  - 10,000 seeded schedules in process, through the production reconcile
+    code and an in-memory log with the same fencing rules;
+  - the real worker binary on PostgreSQL, killed with SIGKILL at every step
+    and fault point, plus every provider fault against every kind.
+
+  A blind-retry reconciler is caught by the same oracle (the drill can
+  fail). Cost: the fake is not a real provider; B2 repeats the drill
+  against the real adapters before a second adapter is added.
+- **D-031 — Components struck or corrected after verification.** MinIO's
+  community edition is excluded as an object store: its repository says it
+  is no longer maintained, ships source only, and was archived on
+  2026-04-25. Candidates are Garage v2.5.0 (AGPLv3, bucket quotas) and
+  SeaweedFS 4.54 (Apache-2.0). D-019's certification claim is corrected
+  above. The control-DB image is `postgres:18.7-trixie`, pinned by digest
+  in `deploy/compose.yaml` and CI. Source: B0 memo §6.
+- **D-032 — Shed at four times the pool; keep busy-machine results.** The
+  control API's `/v1` in-flight bound is 128, four times its 32-connection
+  pool. Beyond that a request would only queue for a connection, so it is
+  refused at once with 503 `overloaded`. The first 100,000-request smoke
+  ran with a bound of 512: goodput collapsed to about 53 requests/s while
+  requests waited out 1 s pool timeouts. After the change, and after GET
+  operation and claim each became one round trip, goodput was about 435
+  requests/s on the same busy machine. Both runs are committed as recorded
+  misses (load average 25–65). Neither is capacity evidence; the
+  quiet-machine smoke and the 1,000,000-request run are owed.
+- **D-033 — The B0 memo recommends staying parked** (`docs/B0_MEMO.md`):
+  a copyable starter template, outside this repository, meets the
+  operations need of the reference workloads with nothing new to run, and
+  the slice they repeat most is the one D-011 keeps a platform from
+  supplying. The memo lists what would change the answer. It awaits the
+  maintainer's acceptance (P-2).
 
 ## Open questions (still open)
 

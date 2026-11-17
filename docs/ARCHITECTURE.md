@@ -121,7 +121,7 @@ worker; worker ↔ providers; workload ↔ host and network; backup storage.
 | T5 | Admin abuse or repudiation | Append-only audit (trigger refuses `UPDATE`, `DELETE`, `TRUNCATE`) with principal, authority, target and outcome; destructive operations (delete project, restore, key rotation) need typed confirmation and a fresh re-authentication | `audit_is_append_only`; `destructive_op_without_reauth_refused` | B1 |
 | T6 | Secret disclosure | Envelope encryption with a key outside the control DB; secrets are write-only in the API and absent from operation steps and logs (D-015) | Log-capture test over every drill; `secrets_are_write_only_in_api`; `step_records_contain_no_secret` | B1 |
 | T7 | Server-side request forgery through user-supplied URLs (OIDC redirect URIs, webhook or registry URLs) | Adapters connect only to configured provider endpoints; user-supplied URLs are validated and stored, and anything the platform must fetch goes through an egress guard that refuses loopback, RFC 1918, link-local and metadata addresses, pins DNS answers and revalidates redirects | Egress tests: link-local, RFC 1918, loopback, DNS rebinding, redirect to a private target — each refused before connecting | B2 |
-| T8 | Supply chain | Provider images pinned by digest; `cargo deny` and `cargo audit` in CI; release provenance and a vulnerability process (B7) | CI job fails on an unpinned image or a known advisory without a recorded exception | B0 |
+| T8 | Supply chain | Provider images pinned by digest; `cargo deny` and `cargo audit` in CI; release provenance and a vulnerability process (B7) | CI job fails on an unpinned image or a known advisory without a recorded exception. B0 implements this with `scripts/check-pins.sh` (images by digest, actions by commit SHA; shown able to fail) and `cargo deny` (advisories, daily) | B0 |
 | T9 | Backup theft or a malicious restore | Backups encrypted at rest with restricted permissions; restore needs re-authentication; restore is followed by reconciliation before any job resumes | Restore drill (failure case 4, point c) | B5 |
 | T10 | Control-plane denial of service | Bounded bodies, per-principal rate limits, admission caps; running apps are unaffected because the control plane is not in their path | `control-plane-down` drill; overload scenario refuses with 429/503, never hangs | B3 |
 
@@ -130,7 +130,13 @@ anything — this is a single-organization tool. The worker host remains the
 crown jewel: compromise of it is compromise of every project, which is why
 it holds no listener and is the only place credentials exist.
 
-## Repo layout (planned)
+## Repo layout
+
+B0 built `platform-domain`, `platform-db`, `platform-adapters` (the port
+and the HTTP adapter for the fake), `platform-worker`, `platform-server`,
+`fixtures/fake-provider`, `deploy/compose.yaml` (the development stack, not
+the starter), `perf/` and `scripts/`. The rest is planned. The reconciler's
+write protocol is D-029, and the fake provider's semantics are D-030.
 
 ```
 crates/      platform-domain, platform-db, platform-server,
