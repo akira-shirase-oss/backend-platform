@@ -6,7 +6,8 @@
 #
 # Toolchain pin, formatting, Clippy with warnings denied, the architecture, pin and results
 # checks (each shown able to fail), the host layer's checks, every test against PostgreSQL
-# (the local stack starts when STARTER_TEST_DATABASE_URL is unset), then cargo-deny. The limit proofs
+# (the local stack starts when STARTER_TEST_DATABASE_URL is unset), the restore drills with
+# their controls and the upgrade rehearsal, then cargo-deny. The limit proofs
 # (scripts/prove-limits.sh) run as their own CI job.
 #
 # Needs: the pinned toolchain through rustup, docker (or STARTER_TEST_DATABASE_URL), and
@@ -81,6 +82,22 @@ if [ -z "${STARTER_TEST_DATABASE_URL:-}" ]; then
 fi
 export STARTER_TEST_DATABASE_URL
 cargo test --workspace --locked
+
+step "drills: PostgreSQL and SQLite restore, their controls, the upgrade rehearsal"
+# A pinned age installed into this copy's target (scripts/install-age.sh target/tools/bin).
+[ -d target/tools/bin ] && PATH="$PWD/target/tools/bin:$PATH"
+if [ -z "${STARTER_PG_CONTAINER:-}" ] && ! command -v pg_dump >/dev/null 2>&1; then
+  eval "$(scripts/stack.sh env | grep STARTER_PG_CONTAINER)"
+fi
+export STARTER_PG_CONTAINER
+if command -v age >/dev/null 2>&1; then
+  scripts/drills/postgres-restore.sh --out target/drills/postgres-restore.json
+  scripts/drills/sqlite-restore.sh --out target/drills/sqlite-restore.json
+  scripts/drills/test-drills.sh
+  scripts/upgrade-rehearsal.sh --out target/drills/upgrade-rehearsal.json
+else
+  echo "note: age is not installed (scripts/install-age.sh target/tools/bin); the drills are skipped locally (CI runs them)"
+fi
 
 step "cargo deny (advisories, licenses, bans, sources)"
 [ -d "$HOME/.cargo/bin" ] && PATH="$PATH:$HOME/.cargo/bin"

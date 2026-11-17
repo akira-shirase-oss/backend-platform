@@ -150,17 +150,29 @@ async fn the_server_refuses_the_owner_role_and_any_schema_but_its_own() {
          VALUES (99999, 'from a newer release', now(), true, '\\x00', 0)",
     )
     .await;
-    // The manifest still holds (the ledger is not a protection), so this is the schema check.
     let (code, out) = run_to_exit(&db.url(), &[]).await;
     assert_eq!(code, 4, "{out}");
     assert!(out.contains("newer"), "{out}");
+    // A newer release's table makes the manifest fail too; the schema is the cause reported.
+    db.exec_as(Role::Owner, "CREATE TABLE from_a_newer_release (id int); GRANT SELECT ON from_a_newer_release TO starter_app").await;
+    let (code, out) = run_to_exit(&db.url(), &[]).await;
+    assert_eq!(code, 4, "{out}");
     db.cleanup().await;
 
-    // Never migrated: the role is fine, but the manifest finds every table missing.
+    // Never migrated: behind, the cause before every missing table.
     let bare = TestDb::unmigrated().await;
     let (code, out) = run_to_exit(&bare.url(), &[]).await;
+    assert_eq!(code, 4, "{out}");
+    assert!(out.contains("behind"), "{out}");
+
+    // A current schema whose protections were weakened: exit 3, naming the problem.
+    let weak = TestDb::new().await;
+    weak.exec_as(Role::Owner, "GRANT UPDATE ON account_events TO starter_app")
+        .await;
+    let (code, out) = run_to_exit(&weak.url(), &[]).await;
     assert_eq!(code, 3, "{out}");
-    assert!(out.contains("is missing"), "{out}");
+    assert!(out.contains("account_events"), "{out}");
+    weak.cleanup().await;
     bare.cleanup().await;
 }
 

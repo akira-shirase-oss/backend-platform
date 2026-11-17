@@ -4,7 +4,7 @@
 # also deletes its volume; `env` prints what the tests and drills read:
 #
 #   STARTER_TEST_DATABASE_URL   the administrator (creates roles and throwaway databases)
-#   STARTER_PG_CONTAINER        where pg_dump and pg_restore run (they are not needed locally)
+#   STARTER_PG_CONTAINER        where the drills run pg_dump and pg_restore (so they need not be installed)
 #
 # Every password here is a public development value.
 set -euo pipefail

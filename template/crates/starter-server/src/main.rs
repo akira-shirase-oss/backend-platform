@@ -89,14 +89,21 @@ impl<E: Into<anyhow::Error>> From<E> for Stop {
 async fn run(config: Config) -> Result<Drained, Stop> {
     let (shutdown, signal) = starter_http::shutdown::on_signal()?;
     let pool = starter_db::connect_lazy(config.database_url.expose(), &config.db)?;
-    match check_at_startup(&pool, config.startup_timeout).await {
-        Ok(()) => {}
-        Err(Refusal::Db(e)) => return Err(Stop::Failed(anyhow::anyhow!(starter_db::chain(&e)))),
-        Err(refused) => return Err(Stop::Refused(refused.to_string())),
+    // The role first; then the schema, since another release's schema also changes what
+    // the manifest sees (a newer table, a missing one) and is the cause to report; then the
+    // protections.
+    let guarded = check_at_startup(&pool, config.startup_timeout).await;
+    if let Err(Refusal::Db(e)) = &guarded {
+        return Err(Stop::Failed(anyhow::anyhow!(starter_db::chain(e))));
     }
-    let status = schema::status(&pool, &starter_db::MIGRATOR).await?;
-    if !status.is_current() {
-        return Err(Stop::Schema(serde_json::to_string(&status)?));
+    if matches!(guarded, Ok(()) | Err(Refusal::Unprotected(_))) {
+        let status = schema::status(&pool, &starter_db::MIGRATOR).await?;
+        if !status.is_current() {
+            return Err(Stop::Schema(serde_json::to_string(&status)?));
+        }
+    }
+    if let Err(refused) = guarded {
+        return Err(Stop::Refused(refused.to_string()));
     }
     let mail: Arc<dyn MailTransport> = if let Some(relay) = config.smtp_relay {
         Arc::new(SmtpRelay::new(relay)?)
