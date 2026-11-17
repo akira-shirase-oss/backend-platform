@@ -249,7 +249,10 @@ starting values; changing one needs a measurement and a new entry.
   create always makes a new resource with a fresh id. So the
   partial-provisioning drill measures the reconciler, not the provider: a
   blind retry shows up as a duplicate, counted on the provider side. A
-  unique-names mode exists for the `AlreadyExists` path. The drill has two
+  unique-names mode exists for the `AlreadyExists` path, and a key-honoring
+  mode for idempotency keys. Besides failing before any effect, losing the
+  reply and hanging past the deadline, the fake can apply a create late
+  (`LateEffect`, D-035). The drill has two
   halves:
   - 10,000 seeded schedules in process, through the production reconcile
     code and an in-memory log with the same fencing rules;
@@ -317,6 +320,24 @@ starting values; changing one needs a measurement and a new entry.
   (review F5; `a_duplicated_name_is_reported_never_adopted`). Cost: a
   duplicate needs a person. Which copy belongs to the project is a decision,
   not a retry.
+
+  **Every create is verified by name.** A create can land after its
+  deadline: the fake's `LateEffect` answers a timeout and applies the create
+  just after the next lookup of that name has answered "absent". On a
+  provider with neither unique names nor idempotency keys, the retry then
+  creates a second resource, and no reconciler can prevent that. So after
+  every create, and after every adoption that follows an attempt with an
+  unknown outcome, the worker looks the name up again:
+  - the recorded id and no other holder: done;
+  - a second holder: `blocked: duplicate`, as above;
+  - no sign of the recorded id: back to `uncertain`, observed again.
+
+  `a_late_create_is_never_reported_as_success` failed before this
+  ("reported succeeded with 3 resources for 2 planned"). The in-process
+  drill runs 10,000 schedules against a plain provider and 10,000 against
+  a keyed one. Keyed: 0 duplicates. Plain: every duplicate a late create
+  made is reported, and none is ever behind a `succeeded`. Cost: one more
+  lookup per create.
 
 ## Open questions (still open)
 

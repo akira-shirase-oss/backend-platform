@@ -7,7 +7,9 @@
 //!    crash still counts against the attempt budget.
 //! 2. **Observe** the deterministic name. Present with the same spec → adopt; different
 //!    spec → blocked; absent → create.
-//! 3. **Create** under the deterministic name, tagged with the operation id.
+//! 3. **Create** under the deterministic name, tagged with the operation id and carrying
+//!    the step's idempotency key; then **verify** by looking the name up again, so a create
+//!    that landed late shows as a duplicate rather than a success.
 //! 4. The result is recorded together with the next step's begin (one statement), or with
 //!    the finish. If the worker dies first, the next worker observes and adopts.
 //!
@@ -145,7 +147,7 @@ pub enum RunError {
     #[error(transparent)]
     Log(#[from] LogError),
     /// A bug: the state machine refused a transition.
-    #[error("the state machine refused a transition")]
+    #[error("the state machine refused a transition: {0}")]
     Transition(#[from] TransitionError),
     /// The local lease deadline passed before a provider call (the worker was paused or
     /// starved): it stops instead of calling, because another worker may own the
@@ -204,7 +206,13 @@ async fn attempt<P: Provider, H: Hooks>(
         Ok(observation) => observation,
         Err(class) => return Ok(step.failed(class)?),
     };
+    // An earlier attempt of this step had an unknown outcome: a create of ours may still
+    // be in flight, so whatever this attempt settles on is verified by name (F5).
+    let after_unknown_outcome = step.attempts > 1 || step.last_error.is_some();
     let Action::Create(request) = step.observe(&observation, operation)? else {
+        if after_unknown_outcome && step.resource_id().is_some() {
+            verify(step, kind, &name, provider, config, lease).await?;
+        }
         return Ok(());
     };
     lease.check(config.call_timeout)?;
@@ -212,7 +220,12 @@ async fn attempt<P: Provider, H: Hooks>(
     let created = call(config.call_timeout, provider.create(&request)).await;
     hooks.at(Point::AfterCreate, position, attempt).await?;
     match created {
-        Ok(id) => step.created(id)?,
+        Ok(id) => {
+            step.created(id)?;
+            // Verify by name: a create that landed late, or any second holder, shows up
+            // here instead of hiding behind a success (F5).
+            verify(step, kind, &name, provider, config, lease).await?;
+        }
         Err(ErrorClass::AlreadyExists) => {
             // Someone holds the name (a lost earlier reply): observe again and adopt.
             lease.check(config.call_timeout)?;
@@ -227,6 +240,23 @@ async fn attempt<P: Provider, H: Hooks>(
             }
         }
         Err(class) => step.failed(class)?,
+    }
+    Ok(())
+}
+
+/// Looks the name up again and checks the step's recorded resource against it.
+async fn verify<P: Provider>(
+    step: &mut Step,
+    kind: platform_domain::ResourceKind,
+    name: &platform_domain::ProviderName,
+    provider: &P,
+    config: &ReconcileConfig,
+    lease: LocalLease,
+) -> Result<(), RunError> {
+    lease.check(config.call_timeout)?;
+    match call(config.call_timeout, provider.lookup(kind, name)).await {
+        Ok(seen) => step.verify(&seen)?,
+        Err(class) => step.verification_failed(class)?,
     }
     Ok(())
 }

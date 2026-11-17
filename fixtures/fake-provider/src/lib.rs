@@ -11,6 +11,8 @@
 //!
 //! - [`Fault::FailBefore`]: answer "unavailable" with no effect.
 //! - [`Fault::LoseReply`]: apply the create, then answer "unavailable" (the reply is lost).
+//! - [`Fault::LateEffect`]: answer nothing in time, and apply the create only after the
+//!   next lookup of that name has answered "absent".
 //! - [`Fault::Hang`]: apply the create (if any), then never answer in time. In process the
 //!   call returns `Timeout` at once; over HTTP the reply is held past the caller's deadline.
 
@@ -38,6 +40,10 @@ pub enum Fault {
     LoseReply,
     /// Apply the effect, then do not answer in time.
     Hang,
+    /// Do not answer in time, and apply the create *later*: just after the next lookup of
+    /// the name has answered "absent" (the worst moment: between a retry's lookup and its
+    /// create). A provider that queues requests behaves like this (F5).
+    LateEffect,
 }
 
 /// Which call a rule matches.
@@ -120,6 +126,8 @@ pub enum CallOutcome {
     AlreadyExists,
     /// Create answered with the resource an earlier create with the same key made.
     Replayed,
+    /// Create taken but not yet applied ([`Fault::LateEffect`]).
+    Delayed,
     /// Failed before any effect.
     Failed,
 }
@@ -178,6 +186,8 @@ struct State {
     unique_names: bool,
     honor_keys: bool,
     keys: HashMap<String, ProviderResourceId>,
+    /// Creates taken with [`Fault::LateEffect`], not yet applied.
+    pending: Vec<CreateRequest>,
     rules: Vec<(FaultRule, u32)>,
     random: Option<(u64, u32, Option<u64>)>,
     calls: Option<Vec<Call>>,
@@ -217,9 +227,10 @@ impl State {
                 }
                 self.faults += 1;
                 let choice = splitmix64(state);
-                return Some(match (call, choice % 3) {
+                return Some(match (call, choice % 4) {
                     (_, 0) => Fault::FailBefore,
                     (CallKind::Create, 1) => Fault::LoseReply,
+                    (CallKind::Create, 2) => Fault::LateEffect,
                     _ => Fault::Hang,
                 });
             }
@@ -290,6 +301,7 @@ impl FakeProvider {
             unique_names: options.unique_names,
             honor_keys: options.honor_idempotency_keys,
             keys: HashMap::new(),
+            pending: Vec::new(),
             rules: Vec::new(),
             random: None,
             calls: options.record_calls.then(Vec::new),
@@ -378,6 +390,9 @@ impl FakeProvider {
         };
         state.record(CallKind::Lookup, kind, name, None, fault, outcome);
         let observation = Observation::from_matches(found);
+        // A late create of this name lands right after the answer was computed: the caller
+        // was just told "absent" (Fault::LateEffect).
+        land_pending(&mut state, kind, name);
         match fault {
             Some(Fault::Hang) => Reply {
                 result: Err(ProviderError::Timeout),
@@ -398,8 +413,9 @@ impl FakeProvider {
     pub fn create_now(&self, request: &CreateRequest) -> Reply<ProviderResourceId> {
         let mut state = self.lock();
         state.creates += 1;
+        // A late create of this name lands before this one is processed.
+        land_pending(&mut state, request.kind, &request.name);
         let fault = state.pick_fault(CallKind::Create, request.kind);
-        let key = (request.kind, request.name.clone());
         if fault == Some(Fault::FailBefore) {
             state.record(
                 CallKind::Create,
@@ -414,58 +430,39 @@ impl FakeProvider {
                 hang: false,
             };
         }
-        if state.honor_keys
-            && !request.idempotency_key.is_empty()
-            && let Some(id) = state.keys.get(&request.idempotency_key).cloned()
-        {
+        if fault == Some(Fault::LateEffect) {
+            state.pending.push(request.clone());
             state.record(
                 CallKind::Create,
                 request.kind,
                 &request.name,
                 Some(request.tag),
                 fault,
-                CallOutcome::Replayed,
+                CallOutcome::Delayed,
             );
             return Reply {
-                result: Ok(id),
-                hang: false,
+                result: Err(ProviderError::Timeout),
+                hang: true,
             };
         }
-        if state.unique_names && state.resources.get(&key).is_some_and(|l| !l.is_empty()) {
-            state.record(
-                CallKind::Create,
-                request.kind,
-                &request.name,
-                Some(request.tag),
-                fault,
-                CallOutcome::AlreadyExists,
-            );
-            return Reply {
-                result: Err(ProviderError::AlreadyExists),
-                hang: fault == Some(Fault::Hang),
-            };
-        }
-        let id = next_id(&mut state, request.kind);
-        if state.honor_keys && !request.idempotency_key.is_empty() {
-            state
-                .keys
-                .insert(request.idempotency_key.clone(), id.clone());
-        }
-        state.resources.entry(key).or_default().push(FakeResource {
-            id: id.clone(),
-            kind: request.kind,
-            name: request.name.clone(),
-            spec: request.spec.clone(),
-            tag: Some(request.tag),
-        });
+        let (applied, outcome) = apply_create(&mut state, request);
         state.record(
             CallKind::Create,
             request.kind,
             &request.name,
             Some(request.tag),
             fault,
-            CallOutcome::Created,
+            outcome,
         );
+        let id = match applied {
+            Ok(id) => id,
+            Err(error) => {
+                return Reply {
+                    result: Err(error),
+                    hang: fault == Some(Fault::Hang),
+                };
+            }
+        };
         match fault {
             Some(Fault::LoseReply) => Reply {
                 result: Err(ProviderError::Unavailable),
@@ -482,9 +479,11 @@ impl FakeProvider {
         }
     }
 
-    /// Every resource held, sorted by kind, name and id.
+    /// Every resource held, sorted by kind, name and id (late creates included: by the
+    /// time anyone counts, they have landed).
     pub fn resources(&self) -> Vec<FakeResource> {
-        let state = self.lock();
+        let mut state = self.lock();
+        land_all_pending(&mut state);
         let mut all: Vec<_> = state.resources.values().flatten().cloned().collect();
         all.sort_by(|a, b| (a.kind, &a.name, &a.id).cmp(&(b.kind, &b.name, &b.id)));
         all
@@ -495,9 +494,10 @@ impl FakeProvider {
         self.lock().calls.clone().unwrap_or_default()
     }
 
-    /// Provider-side counts, duplicates included.
+    /// Provider-side counts, duplicates included (late creates landed first).
     pub fn inventory(&self) -> Inventory {
-        let state = self.lock();
+        let mut state = self.lock();
+        land_all_pending(&mut state);
         let mut duplicates: Vec<_> = state
             .resources
             .iter()
@@ -517,6 +517,57 @@ impl FakeProvider {
             creates: state.creates,
             faults_injected: state.faults,
         }
+    }
+}
+
+/// Applies a create: replays a known idempotency key, refuses a taken name in unique mode,
+/// or makes a new resource.
+fn apply_create(
+    state: &mut State,
+    request: &CreateRequest,
+) -> (Result<ProviderResourceId, ProviderError>, CallOutcome) {
+    if state.honor_keys
+        && !request.idempotency_key.is_empty()
+        && let Some(id) = state.keys.get(&request.idempotency_key).cloned()
+    {
+        return (Ok(id), CallOutcome::Replayed);
+    }
+    let key = (request.kind, request.name.clone());
+    if state.unique_names && state.resources.get(&key).is_some_and(|l| !l.is_empty()) {
+        return (
+            Err(ProviderError::AlreadyExists),
+            CallOutcome::AlreadyExists,
+        );
+    }
+    let id = next_id(state, request.kind);
+    if state.honor_keys && !request.idempotency_key.is_empty() {
+        state
+            .keys
+            .insert(request.idempotency_key.clone(), id.clone());
+    }
+    state.resources.entry(key).or_default().push(FakeResource {
+        id: id.clone(),
+        kind: request.kind,
+        name: request.name.clone(),
+        spec: request.spec.clone(),
+        tag: Some(request.tag),
+    });
+    (Ok(id), CallOutcome::Created)
+}
+
+fn land_pending(state: &mut State, kind: ResourceKind, name: &ProviderName) {
+    let (landing, waiting): (Vec<_>, Vec<_>) = std::mem::take(&mut state.pending)
+        .into_iter()
+        .partition(|r| r.kind == kind && &r.name == name);
+    state.pending = waiting;
+    for request in landing {
+        let _ = apply_create(state, &request);
+    }
+}
+
+fn land_all_pending(state: &mut State) {
+    for request in std::mem::take(&mut state.pending) {
+        let _ = apply_create(state, &request);
     }
 }
 

@@ -10,9 +10,10 @@
 //! Lifecycle of a step within one retry round:
 //!
 //! ```text
-//! Pending ──begin──▶ Uncertain ──observe: absent──▶ (create) ──created──▶ Done
+//! Pending ──begin──▶ Uncertain ──observe: absent──▶ (create) ──created + verified──▶ Done
 //!                       ▲  │ └──observe: present, same spec──────────────▶ Done (adopted)
 //!                       │  ├──observe: present, other spec──▶ Blocked (conflict)
+//!                       │  ├──observe or verify: two holders──▶ Blocked (duplicate)
 //!                       │  ├──failed: rejected──────────────▶ Blocked (rejected)
 //!                       └──┴──failed: retryable / crash──▶ Uncertain ──budget spent──▶ GaveUp
 //! ```
@@ -301,6 +302,41 @@ impl Step {
             adopted: false,
         };
         self.last_error = None;
+        Ok(())
+    }
+
+    /// Checks a resource just created, or adopted after an attempt whose outcome was unknown,
+    /// against a fresh lookup of its name (F5). A create that landed late, or any other
+    /// second holder, shows up here and blocks the step as a duplicate; an answer that does
+    /// not show the recorded id puts the step back to uncertain, to be observed again.
+    /// Never reports success with an extra resource.
+    pub fn verify(&mut self, observation: &Observation) -> Result<(), TransitionError> {
+        let StepState::Done { resource_id, .. } = &self.state else {
+            return Err(self.refuse("verify a resource"));
+        };
+        match observation {
+            Observation::Present(found) if &found.id == resource_id => {}
+            Observation::Many { .. } => {
+                self.state = StepState::Blocked {
+                    reason: BlockReason::Duplicate,
+                };
+            }
+            Observation::Absent | Observation::Present(_) => {
+                self.state = StepState::Uncertain;
+                self.last_error = Some(ErrorClass::Protocol);
+            }
+        }
+        Ok(())
+    }
+
+    /// The verifying lookup failed: the create stands unverified, so the step goes back to
+    /// uncertain and the next attempt observes again.
+    pub fn verification_failed(&mut self, class: ErrorClass) -> Result<(), TransitionError> {
+        if !matches!(self.state, StepState::Done { .. }) {
+            return Err(self.refuse("record a failed verification"));
+        }
+        self.state = StepState::Uncertain;
+        self.last_error = Some(class);
         Ok(())
     }
 

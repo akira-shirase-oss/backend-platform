@@ -53,11 +53,18 @@ struct Case {
 
 impl Case {
     async fn new(faults: FaultConfig) -> Self {
+        Self::with(FakeOptions {
+            faults,
+            ..FakeOptions::default()
+        })
+        .await
+    }
+
+    async fn with(options: FakeOptions) -> Self {
         let db = TestDb::new().await;
         let fake = Arc::new(FakeProvider::new(FakeOptions {
             record_calls: true,
-            faults,
-            ..FakeOptions::default()
+            ..options
         }));
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let provider_url = format!("http://{}", listener.local_addr().unwrap());
@@ -235,8 +242,11 @@ async fn kill_case(point: &'static str, position: u16) -> String {
     format!("{label}: {halted}; converged, {creates} creates for 5 resources")
 }
 
-async fn provider_case(on: CallKind, kind: ResourceKind, fault: Fault) -> String {
-    let label = format!("{fault:?} on {on:?} of {kind}");
+async fn provider_case(on: CallKind, kind: ResourceKind, fault: Fault, keys: bool) -> String {
+    let label = format!(
+        "{fault:?} on {on:?} of {kind}{}",
+        if keys { " (idempotency keys)" } else { "" }
+    );
     let faults = FaultConfig {
         rules: vec![FaultRule {
             on,
@@ -246,7 +256,12 @@ async fn provider_case(on: CallKind, kind: ResourceKind, fault: Fault) -> String
         }],
         random: None,
     };
-    let case = Case::new(faults).await;
+    let case = Case::with(FakeOptions {
+        faults,
+        honor_idempotency_keys: keys,
+        ..FakeOptions::default()
+    })
+    .await;
     let worker = case.worker(None);
     case.wait_until_succeeded(&label).await;
     case.verify(&label).await;
@@ -297,14 +312,60 @@ async fn provider_failures_at_every_kind_converge() {
             let gate = gate.clone();
             cases.spawn(async move {
                 let _permit = gate.acquire_owned().await.unwrap();
-                provider_case(on, kind, fault).await
+                provider_case(on, kind, fault, false).await
             });
         }
+        // A create that lands after the deadline, on a provider that de-duplicates by key:
+        // converges on exactly the plan (F5).
+        let gate = gate.clone();
+        cases.spawn(async move {
+            let _permit = gate.acquire_owned().await.unwrap();
+            provider_case(CallKind::Create, kind, Fault::LateEffect, true).await
+        });
     }
     let mut report = cases.join_all().await;
     report.sort();
     for line in &report {
         eprintln!("{line}");
     }
-    assert_eq!(report.len(), 20);
+    assert_eq!(report.len(), 25);
+}
+
+/// A create that lands after the deadline on a provider with neither keys nor unique
+/// names, over HTTP: the duplicate it makes is reported (`partial`, step blocked), and the
+/// operation never reads `succeeded` (F5).
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_late_create_over_http_is_reported_never_hidden() {
+    let faults = FaultConfig {
+        rules: vec![FaultRule {
+            on: CallKind::Create,
+            kind: Some(ResourceKind::Bucket),
+            nth: 1,
+            fault: Fault::LateEffect,
+        }],
+        random: None,
+    };
+    let case = Case::new(faults).await;
+    let worker = case.worker(None);
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
+    let status = loop {
+        let status = case.status().await;
+        assert_ne!(
+            status.status, "succeeded",
+            "a duplicate was hidden behind a success"
+        );
+        if status.status == "partial" {
+            break status;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "not settled: {status:?}"
+        );
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    };
+    let bucket = status.steps.iter().find(|s| s.kind == "bucket").unwrap();
+    assert_eq!(bucket.status, "blocked");
+    assert_eq!(case.fake.inventory().duplicates.len(), 1);
+    drop(worker);
+    case.finish().await;
 }

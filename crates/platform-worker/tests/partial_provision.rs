@@ -12,7 +12,7 @@
 //!
 //! Pass: exactly one provider resource per planned resource, nothing orphaned, every
 //! recorded id real, no create without a delivered "absent" observation — for every
-//! schedule. `BP_DRILL_REPORT=<path>` writes the totals as JSON.
+//! schedule. `BP_DRILL_REPORT_DIR=<dir>` writes each mode's totals as JSON.
 #![allow(clippy::unwrap_used, reason = "drill: a panic is the failure report")]
 #![allow(
     clippy::unused_async_trait_impl,
@@ -28,9 +28,13 @@ use common::{MemLog, check};
 use platform_adapters::Provider;
 use platform_domain::{
     CreateRequest, DesiredState, IdentitySpec, LogicalName, Operation, OperationId,
-    OperationOutcome, OperationState, Plan, ProjectId, ResourceSpec, RetryPolicy, StepState,
+    OperationOutcome, OperationState, Plan, ProjectId, ResourceKind, ResourceSpec, RetryPolicy,
+    StepState,
 };
-use platform_fake_provider::{FakeOptions, FakeProvider, FaultConfig, RandomFaults, splitmix64};
+use platform_fake_provider::{
+    CallKind, CallOutcome, FakeOptions, FakeProvider, Fault, FaultConfig, FaultRule, RandomFaults,
+    splitmix64,
+};
 use platform_worker::{Halted, Hooks, Point, ReconcileConfig, RunError, run_claimed};
 use uuid::Uuid;
 
@@ -93,23 +97,98 @@ fn config() -> ReconcileConfig {
     }
 }
 
+/// What the provider promises about names (the drill runs each, F5/F6).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+enum Mode {
+    /// Neither unique names nor idempotency keys: a create that lands late can make a
+    /// duplicate no reconciler can prevent; the pass condition is that every such
+    /// duplicate is reported and none is ever hidden behind a success.
+    Plain,
+    /// Creates are de-duplicated by idempotency key: zero duplicates, always.
+    Keys,
+    /// A taken name is refused (`CREATE DATABASE`, bucket names): zero duplicates, always,
+    /// through the `AlreadyExists` → look up → adopt path.
+    Unique,
+}
+
 #[derive(Debug, Default, serde::Serialize)]
 struct Totals {
+    mode: Option<Mode>,
     schedules: u64,
     planned_resources: u64,
     provider_faults_injected: u64,
+    late_effects_injected: u64,
     worker_crashes: u64,
     partial_rounds_retried: u64,
     pre_existing_resources_adopted: u64,
     resources_adopted_after_lost_reply_or_crash: u64,
+    already_exists_answers: u64,
+    idempotent_replays: u64,
     creates_sent: u64,
     lookups_sent: u64,
-    duplicates: u64,
+    duplicates_reported_visibly: u64,
+    silent_duplicates: u64,
     orphans: u64,
     failures: u64,
 }
 
-async fn run_schedule(seed: u64, totals: &mut Totals) -> Result<(), String> {
+/// A partial round that ended on duplicates (plain mode only): every duplicated name is
+/// a step blocked `duplicate`, every such step names a real duplicate that a late create
+/// caused, and nothing outside the plan exists.
+fn check_reported_duplicates(
+    plan: &Plan,
+    provider: &FakeProvider,
+    operation: &Operation,
+) -> Result<u64, String> {
+    let inventory = provider.inventory();
+    let mut duplicated: Vec<String> = inventory
+        .duplicates
+        .iter()
+        .map(|d| format!("{}:{}", d.kind, d.name))
+        .collect();
+    let mut blocked: Vec<String> = operation
+        .steps
+        .iter()
+        .filter(|s| {
+            s.state
+                == StepState::Blocked {
+                    reason: platform_domain::BlockReason::Duplicate,
+                }
+        })
+        .map(|s| format!("{}:{}", s.resource.kind, s.resource.name))
+        .collect();
+    duplicated.sort();
+    blocked.sort();
+    if duplicated != blocked {
+        return Err(format!("duplicates {duplicated:?} but blocked {blocked:?}"));
+    }
+    let late: Vec<String> = provider
+        .calls()
+        .iter()
+        .filter(|c| c.fault == Some(Fault::LateEffect))
+        .map(|c| format!("{}:{}", c.kind, c.name))
+        .collect();
+    if let Some(unexplained) = duplicated.iter().find(|d| !late.contains(d)) {
+        return Err(format!("duplicate {unexplained} without a late create"));
+    }
+    let planned: Vec<String> = plan
+        .resources
+        .iter()
+        .map(|r| format!("{}:{}", r.kind, r.name))
+        .collect();
+    if let Some(stray) = provider
+        .resources()
+        .iter()
+        .map(|r| format!("{}:{}", r.kind, r.name))
+        .find(|n| !planned.contains(n))
+    {
+        return Err(format!("orphans: {stray} is not planned"));
+    }
+    Ok(duplicated.len() as u64)
+}
+
+async fn run_schedule(seed: u64, mode: Mode, totals: &mut Totals) -> Result<(), String> {
     let mut rng = seed.wrapping_mul(0xA24B_AED4_963E_E407) ^ 0x0005_DEEC_E66D;
     let project = ProjectId::parse("drill").unwrap();
     let (_desired, plan) = random_plan(&mut rng, &project);
@@ -124,7 +203,8 @@ async fn run_schedule(seed: u64, totals: &mut Totals) -> Result<(), String> {
     let provider = FakeProvider::new(FakeOptions {
         record_calls: true,
         faults,
-        ..FakeOptions::default()
+        unique_names: mode == Mode::Unique,
+        honor_idempotency_keys: mode == Mode::Keys,
     });
     // Sometimes an earlier, forgotten operation already made one of the resources.
     let mut seeded = 0;
@@ -167,36 +247,87 @@ async fn run_schedule(seed: u64, totals: &mut Totals) -> Result<(), String> {
         let operation = log.get(id);
         match operation.state {
             OperationState::Succeeded => {
+                // Success means exactly the plan: never an extra resource.
+                if !provider.inventory().duplicates.is_empty() {
+                    totals.silent_duplicates += 1;
+                }
                 check(&plan, &provider, Some(&operation))
                     .map_err(|e| format!("seed {seed}: {e}"))?;
                 break;
             }
-            OperationState::Partial => {
-                // A visible partial: every recorded id is real, nothing duplicated so far.
-                for step in operation.steps.iter().filter(|s| s.resource_id().is_some()) {
-                    let held = provider
-                        .resources()
-                        .into_iter()
-                        .filter(|r| r.name == step.resource.name && r.kind == step.resource.kind)
-                        .count();
-                    if held != 1 {
-                        return Err(format!(
-                            "seed {seed}: partial round recorded step {} with {held} provider resources",
-                            step.position
-                        ));
-                    }
+            OperationState::Partial
+                if operation.steps.iter().any(|s| {
+                    s.state
+                        == StepState::Blocked {
+                            reason: platform_domain::BlockReason::Duplicate,
+                        }
+                }) =>
+            {
+                if mode != Mode::Plain {
+                    return Err(format!("seed {seed}: duplicates in {mode:?} mode"));
                 }
+                totals.duplicates_reported_visibly +=
+                    check_reported_duplicates(&plan, &provider, &operation)
+                        .map_err(|e| format!("seed {seed}: {e}"))?;
+                break;
+            }
+            OperationState::Partial => {
+                check_visible_partial(&provider, &operation)
+                    .map_err(|e| format!("seed {seed}: {e}"))?;
                 totals.partial_rounds_retried += 1;
                 log.retry(id).map_err(|e| format!("seed {seed}: {e}"))?;
             }
             OperationState::Pending | OperationState::Running => {}
         }
     }
-    let operation = log.get(id);
+    record(&plan, &provider, &log.get(id), seeded, totals);
+    Ok(())
+}
+
+/// A visible partial round: every step that recorded an id holds exactly one provider
+/// resource, the one it recorded.
+fn check_visible_partial(provider: &FakeProvider, operation: &Operation) -> Result<(), String> {
+    for step in operation.steps.iter().filter(|s| s.resource_id().is_some()) {
+        let held = provider
+            .resources()
+            .into_iter()
+            .filter(|r| r.name == step.resource.name && r.kind == step.resource.kind)
+            .count();
+        if held != 1 {
+            return Err(format!(
+                "partial round recorded step {} with {held} provider resources",
+                step.position
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// Adds one finished schedule to the totals.
+fn record(
+    plan: &Plan,
+    provider: &FakeProvider,
+    operation: &Operation,
+    seeded: u64,
+    totals: &mut Totals,
+) {
     let inventory = provider.inventory();
+    let calls = provider.calls();
     totals.schedules += 1;
     totals.planned_resources += plan.resources.len() as u64;
     totals.provider_faults_injected += inventory.faults_injected;
+    totals.late_effects_injected += calls
+        .iter()
+        .filter(|c| c.fault == Some(Fault::LateEffect))
+        .count() as u64;
+    totals.already_exists_answers += calls
+        .iter()
+        .filter(|c| c.outcome == CallOutcome::AlreadyExists)
+        .count() as u64;
+    totals.idempotent_replays += calls
+        .iter()
+        .filter(|c| c.outcome == CallOutcome::Replayed)
+        .count() as u64;
     totals.creates_sent += inventory.creates;
     totals.lookups_sent += inventory.lookups;
     let adopted = operation
@@ -206,26 +337,28 @@ async fn run_schedule(seed: u64, totals: &mut Totals) -> Result<(), String> {
         .count() as u64;
     totals.pre_existing_resources_adopted += seeded;
     totals.resources_adopted_after_lost_reply_or_crash += adopted.saturating_sub(seeded);
-    Ok(())
 }
 
-#[tokio::test]
-async fn partial_provisioning_converges_over_10000_fault_schedules() {
-    let mut totals = Totals::default();
+async fn run_mode(mode: Mode) -> Totals {
+    let mut totals = Totals {
+        mode: Some(mode),
+        ..Totals::default()
+    };
     let mut failures = Vec::new();
     for seed in 0..SCHEDULES {
-        if let Err(failure) = run_schedule(seed, &mut totals).await {
+        if let Err(failure) = run_schedule(seed, mode, &mut totals).await {
             totals.failures += 1;
-            if failure.contains("duplicates") {
-                totals.duplicates += 1;
-            }
             if failure.contains("orphans") {
                 totals.orphans += 1;
             }
             failures.push(failure);
         }
     }
-    if let Ok(path) = std::env::var("BP_DRILL_REPORT") {
+    if let Ok(dir) = std::env::var("BP_DRILL_REPORT_DIR") {
+        let path = format!(
+            "{dir}/partial-provision-{}.json",
+            serde_json::to_value(mode).unwrap().as_str().unwrap()
+        );
         std::fs::write(&path, serde_json::to_string_pretty(&totals).unwrap()).unwrap();
     }
     eprintln!(
@@ -234,18 +367,43 @@ async fn partial_provisioning_converges_over_10000_fault_schedules() {
     );
     assert!(
         failures.is_empty(),
-        "{} of {SCHEDULES} schedules failed; first: {:?}",
+        "{} of {SCHEDULES} schedules failed in {mode:?} mode; first: {:?}",
         failures.len(),
         &failures[..failures.len().min(5)]
     );
     assert_eq!(totals.schedules, SCHEDULES);
+    assert_eq!(totals.silent_duplicates, 0, "{totals:?}");
     // The schedules must actually have exercised the dangerous paths.
     assert!(totals.provider_faults_injected > SCHEDULES, "{totals:?}");
+    assert!(totals.late_effects_injected > 1_000, "{totals:?}");
     assert!(totals.worker_crashes > SCHEDULES / 2, "{totals:?}");
     assert!(totals.partial_rounds_retried > 100, "{totals:?}");
+    totals
+}
+
+/// Plain provider: converges on exactly the plan, or reports every duplicate a late create
+/// made; never a success with an extra resource.
+#[tokio::test]
+async fn partial_provisioning_converges_over_10000_fault_schedules() {
+    let totals = run_mode(Mode::Plain).await;
     assert!(
         totals.resources_adopted_after_lost_reply_or_crash > 1_000,
         "{totals:?}"
+    );
+    assert!(
+        totals.duplicates_reported_visibly > 0,
+        "late creates must be exercised: {totals:?}"
+    );
+}
+
+/// A provider that de-duplicates by idempotency key: zero duplicates over 10,000 schedules.
+#[tokio::test]
+async fn with_idempotency_keys_10000_fault_schedules_make_zero_duplicates() {
+    let totals = run_mode(Mode::Keys).await;
+    assert_eq!(totals.duplicates_reported_visibly, 0, "{totals:?}");
+    assert!(
+        totals.idempotent_replays > 100,
+        "late creates must be replayed: {totals:?}"
     );
 }
 
@@ -388,4 +546,64 @@ async fn a_duplicated_name_is_reported_never_adopted() {
     );
     assert_eq!(operation.steps[0].state.status(), "blocked");
     assert_eq!(provider.inventory().resources, 2, "both left as found");
+}
+
+/// A create that lands after its deadline (F5), on a provider with neither unique names
+/// nor idempotency keys: the retry's lookup sees the name absent, the late create lands,
+/// the retry creates again. The platform cannot prevent that duplicate, but it must never
+/// report success with an extra resource: the create is verified, and the duplicate is
+/// reported (blocked `duplicate`, operation `partial`).
+#[tokio::test]
+async fn a_late_create_is_never_reported_as_success() {
+    let project = ProjectId::parse("drill").unwrap();
+    let desired = DesiredState {
+        databases: names("db", 1),
+        buckets: Vec::new(),
+        identity: None,
+    };
+    let plan = Plan::build(&project, &desired).unwrap();
+    let faults = FaultConfig {
+        rules: vec![FaultRule {
+            on: CallKind::Create,
+            kind: Some(ResourceKind::DatabaseRole),
+            nth: 1,
+            fault: Fault::LateEffect,
+        }],
+        random: None,
+    };
+    let provider = FakeProvider::new(FakeOptions {
+        faults,
+        ..FakeOptions::default()
+    });
+    let log = MemLog::default();
+    let id = OperationId(Uuid::from_u128(12));
+    log.insert(Operation::new(id, 1, &plan));
+    let claimed = platform_worker::OperationLog::claim(&log, Uuid::nil(), Duration::from_secs(1))
+        .await
+        .unwrap()
+        .unwrap();
+    let outcome = run_claimed(
+        &log,
+        &provider,
+        &platform_worker::NoHooks,
+        &config(),
+        claimed,
+        &mut 1,
+    )
+    .await
+    .unwrap();
+    let held = provider.inventory().resources;
+    assert!(
+        !(outcome == OperationOutcome::Succeeded && held > plan.resources.len()),
+        "reported succeeded with {held} resources for {} planned",
+        plan.resources.len()
+    );
+    let operation = log.get(id);
+    assert_eq!(outcome, OperationOutcome::Partial);
+    assert_eq!(
+        operation.steps[0].state,
+        StepState::Blocked {
+            reason: platform_domain::BlockReason::Duplicate
+        }
+    );
 }
