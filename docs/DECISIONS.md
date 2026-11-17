@@ -307,6 +307,17 @@ starting values; changing one needs a measurement and a new entry.
   "organization admin is trusted" risk, which the T5 audit in B1 must
   record.
 
+- **D-035 — Duplicates are seen and reported, never adopted.** A lookup
+  returns every resource holding the deterministic name: the fake, the wire
+  (`{"matches": [...]}`) and the adapter all carry the list. When more than
+  one resource holds the name, the step is `blocked` with reason
+  `duplicate`, the operation ends a visible `partial`, and both resources
+  are left as found. Before this, the fake's lookup returned the first
+  match, so a duplicate was adopted and the operation reported `succeeded`
+  (review F5; `a_duplicated_name_is_reported_never_adopted`). Cost: a
+  duplicate needs a person. Which copy belongs to the project is a decision,
+  not a retry.
+
 ## Open questions (still open)
 
 These need the maintainer or an outside party; each is in the README's

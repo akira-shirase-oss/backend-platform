@@ -1,6 +1,7 @@
 //! The fake provider's HTTP protocol (`/v1`), shared by the fixture and [`crate::HttpProvider`].
 //!
-//! - `GET  /v1/{kind}/{name}` → `200` [`ResourceBody`] or `404`
+//! - `GET  /v1/{kind}/{name}` → `200` [`LookupBody`] (every resource holding the name) or
+//!   `404`
 //! - `POST /v1/{kind}` [`CreateBody`] → `201` [`CreatedBody`], `409` (name taken, only
 //!   when the fake enforces unique names), `400` (rejected), `503` (unavailable)
 
@@ -20,6 +21,15 @@ pub struct ResourceBody {
     pub spec: ResourceSpec,
     /// The creating operation.
     pub tag: Option<OperationId>,
+}
+
+/// A lookup reply: every resource under the name. More than one is a duplicate, reported
+/// as such, never collapsed to the first (F5).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LookupBody {
+    /// The matches.
+    pub matches: Vec<ResourceBody>,
 }
 
 /// A create request.

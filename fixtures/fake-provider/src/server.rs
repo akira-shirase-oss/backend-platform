@@ -10,7 +10,7 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post, put};
 use axum::{Json, Router};
 use platform_adapters::ProviderError;
-use platform_adapters::wire::{CreateBody, CreatedBody, ResourceBody};
+use platform_adapters::wire::{CreateBody, CreatedBody, LookupBody, ResourceBody};
 use platform_domain::{CreateRequest, Observation, ProviderName, ResourceKind};
 
 use crate::{FakeProvider, FaultConfig, Reply};
@@ -66,10 +66,12 @@ async fn lookup(
     let reply = app.fake.lookup_now(kind, &name);
     deliver(app.hang, reply, |observation| match observation {
         Observation::Absent => StatusCode::NOT_FOUND.into_response(),
-        Observation::Present(found) => Json(ResourceBody {
-            id: found.id,
-            spec: found.spec,
-            tag: found.tag,
+        Observation::Present(one) => Json(LookupBody {
+            matches: vec![body(one)],
+        })
+        .into_response(),
+        Observation::Many { found } => Json(LookupBody {
+            matches: found.into_iter().map(body).collect(),
         })
         .into_response(),
     })
@@ -99,6 +101,14 @@ async fn create(
         (StatusCode::CREATED, Json(CreatedBody { id })).into_response()
     })
     .await
+}
+
+fn body(found: platform_domain::ObservedResource) -> ResourceBody {
+    ResourceBody {
+        id: found.id,
+        spec: found.spec,
+        tag: found.tag,
+    }
 }
 
 async fn set_faults(State(app): State<AppState>, Json(faults): Json<FaultConfig>) -> StatusCode {

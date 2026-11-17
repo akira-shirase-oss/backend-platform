@@ -8,7 +8,7 @@ use platform_domain::{
 };
 use reqwest::StatusCode;
 
-use crate::wire::{self, CreateBody, CreatedBody, MAX_REPLY_BYTES, ResourceBody};
+use crate::wire::{self, CreateBody, CreatedBody, LookupBody, MAX_REPLY_BYTES};
 use crate::{Provider, ProviderError};
 
 /// Where the provider is and how long a call may take.
@@ -101,16 +101,22 @@ impl Provider for HttpProvider {
             StatusCode::NOT_FOUND => Ok(Observation::Absent),
             StatusCode::OK => {
                 let body = read_bounded(response).await?;
-                let found: ResourceBody =
+                let found: LookupBody =
                     serde_json::from_slice(&body).map_err(|_| ProviderError::Protocol)?;
-                if found.spec.kind() != kind {
+                if found.matches.is_empty() || found.matches.iter().any(|m| m.spec.kind() != kind) {
                     return Err(ProviderError::Protocol);
                 }
-                Ok(Observation::Present(ObservedResource {
-                    id: found.id,
-                    spec: found.spec,
-                    tag: found.tag,
-                }))
+                Ok(Observation::from_matches(
+                    found
+                        .matches
+                        .into_iter()
+                        .map(|m| ObservedResource {
+                            id: m.id,
+                            spec: m.spec,
+                            tag: m.tag,
+                        })
+                        .collect(),
+                ))
             }
             status => Err(status_error(status)),
         }

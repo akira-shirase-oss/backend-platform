@@ -49,6 +49,20 @@ pub enum Observation {
     Absent,
     /// A resource exists under the name.
     Present(ObservedResource),
+    /// More than one resource holds the name: a duplicate made outside the platform's
+    /// control (or by a provider that took a create late). Never adopted (F5).
+    Many { found: Vec<ObservedResource> },
+}
+
+impl Observation {
+    /// Builds an observation from every resource a provider holds under one name.
+    pub fn from_matches(mut found: Vec<ObservedResource>) -> Self {
+        match found.len() {
+            0 => Self::Absent,
+            1 => Self::Present(found.remove(0)),
+            _ => Self::Many { found },
+        }
+    }
 }
 
 /// A provider failure, classified. Only `Rejected` is final; every other class leaves the
@@ -95,6 +109,9 @@ pub enum BlockReason {
     Conflict,
     /// The provider refused the request.
     Rejected,
+    /// The provider holds more than one resource under the deterministic name. Both are
+    /// left as found; a person decides which one is the project's.
+    Duplicate,
 }
 
 /// Where a step stands.
@@ -262,6 +279,12 @@ impl Step {
             Observation::Present(_) => {
                 self.state = StepState::Blocked {
                     reason: BlockReason::Conflict,
+                };
+                Ok(Action::Settled)
+            }
+            Observation::Many { .. } => {
+                self.state = StepState::Blocked {
+                    reason: BlockReason::Duplicate,
                 };
                 Ok(Action::Settled)
             }

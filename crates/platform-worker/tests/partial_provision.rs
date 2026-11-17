@@ -345,3 +345,47 @@ async fn a_conflicting_resource_blocks_visibly_and_is_left_alone() {
         (stranger, ResourceSpec::Bucket { quota_bytes: 7 })
     );
 }
+
+/// A name the provider holds twice is never adopted as if it were one (F5): the
+/// operation ends a visible `partial`, the step blocked as a duplicate, both resources
+/// left as found for a person to resolve.
+#[tokio::test]
+async fn a_duplicated_name_is_reported_never_adopted() {
+    let project = ProjectId::parse("drill").unwrap();
+    let desired = DesiredState {
+        databases: names("db", 1),
+        buckets: Vec::new(),
+        identity: None,
+    };
+    let plan = Plan::build(&project, &desired).unwrap();
+    let provider = FakeProvider::new(FakeOptions::default());
+    let role = &plan.resources[0];
+    provider.seed(role.kind, role.name.clone(), role.spec.clone());
+    provider.seed(role.kind, role.name.clone(), role.spec.clone());
+    let log = MemLog::default();
+    let id = OperationId(Uuid::from_u128(11));
+    log.insert(Operation::new(id, 1, &plan));
+    let claimed = platform_worker::OperationLog::claim(&log, Uuid::nil(), Duration::from_secs(1))
+        .await
+        .unwrap()
+        .unwrap();
+    let outcome = run_claimed(
+        &log,
+        &provider,
+        &platform_worker::NoHooks,
+        &config(),
+        claimed,
+        &mut 1,
+    )
+    .await
+    .unwrap();
+    let operation = log.get(id);
+    assert_eq!(
+        outcome,
+        OperationOutcome::Partial,
+        "{:?}",
+        operation.steps[0].state
+    );
+    assert_eq!(operation.steps[0].state.status(), "blocked");
+    assert_eq!(provider.inventory().resources, 2, "both left as found");
+}

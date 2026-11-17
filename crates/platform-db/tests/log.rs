@@ -284,3 +284,39 @@ async fn retry_resumes_a_partial_operation_but_never_stale_intent() {
     ));
     db.cleanup().await;
 }
+
+#[tokio::test]
+async fn a_duplicate_block_is_stored_and_shown() {
+    let db = TestDb::new().await;
+    let a = admit(&db, "shop", &desired(&["main"]), None).await.unwrap();
+    let mut claimed = log::claim(&db.pool, Uuid::now_v7(), LEASE)
+        .await
+        .unwrap()
+        .unwrap();
+    let step = &mut claimed.operation.steps[0];
+    step.begin_attempt(&RetryPolicy::default()).unwrap();
+    let found = |n: &str| platform_domain::ObservedResource {
+        id: ProviderResourceId::parse(n).unwrap(),
+        spec: step.resource.spec.clone(),
+        tag: None,
+    };
+    let many = platform_domain::Observation::Many {
+        found: vec![found("a1"), found("a2")],
+    };
+    step.observe(&many, claimed.operation.id).unwrap();
+    let steps = [&claimed.operation.steps[0]];
+    assert!(
+        log::finish(&db.pool, &claimed.lease, OperationState::Partial, &steps)
+            .await
+            .unwrap()
+    );
+    let view = log::get(&db.pool, a.operation_id).await.unwrap().unwrap();
+    assert_eq!((view.status, view.steps[0].status), ("partial", "blocked"));
+    let reason: Option<String> =
+        sqlx::query_scalar("SELECT block_reason FROM operation_steps WHERE position = 0")
+            .fetch_one(&db.pool)
+            .await
+            .unwrap();
+    assert_eq!(reason.as_deref(), Some("duplicate"));
+    db.cleanup().await;
+}

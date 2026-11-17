@@ -359,24 +359,25 @@ impl FakeProvider {
                 hang: false,
             };
         }
-        let found = state
+        // Every match, not the first: a duplicate must be visible to the caller (F5).
+        let found: Vec<ObservedResource> = state
             .resources
             .get(&(kind, name.clone()))
-            .and_then(|list| list.first())
-            .cloned();
-        let outcome = if found.is_some() {
-            CallOutcome::Present
-        } else {
-            CallOutcome::Absent
-        };
-        state.record(CallKind::Lookup, kind, name, None, fault, outcome);
-        let observation = found.map_or(Observation::Absent, |r| {
-            Observation::Present(ObservedResource {
-                id: r.id,
-                spec: r.spec,
+            .into_iter()
+            .flatten()
+            .map(|r| ObservedResource {
+                id: r.id.clone(),
+                spec: r.spec.clone(),
                 tag: r.tag,
             })
-        });
+            .collect();
+        let outcome = if found.is_empty() {
+            CallOutcome::Absent
+        } else {
+            CallOutcome::Present
+        };
+        state.record(CallKind::Lookup, kind, name, None, fault, outcome);
+        let observation = Observation::from_matches(found);
         match fault {
             Some(Fault::Hang) => Reply {
                 result: Err(ProviderError::Timeout),

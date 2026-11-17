@@ -52,6 +52,7 @@ pub(crate) fn block_reason_str(reason: BlockReason) -> &'static str {
     match reason {
         BlockReason::Conflict => "conflict",
         BlockReason::Rejected => "rejected",
+        BlockReason::Duplicate => "duplicate",
     }
 }
 
@@ -86,6 +87,7 @@ impl StepRow {
                 reason: match self.block_reason.as_deref() {
                     Some("conflict") => BlockReason::Conflict,
                     Some("rejected") => BlockReason::Rejected,
+                    Some("duplicate") => BlockReason::Duplicate,
                     other => return Err(corrupt("block reason", format!("{other:?}"))),
                 },
             },

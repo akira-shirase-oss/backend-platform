@@ -217,7 +217,9 @@ async fn attempt<P: Provider, H: Hooks>(
             // Someone holds the name (a lost earlier reply): observe again and adopt.
             lease.check(config.call_timeout)?;
             match call(config.call_timeout, provider.lookup(kind, &name)).await {
-                Ok(again @ Observation::Present(_)) => {
+                // One holder: adopt it (or block on a spec conflict). Several: blocked as a
+                // duplicate, never adopted.
+                Ok(again @ (Observation::Present(_) | Observation::Many { .. })) => {
                     let _settled = step.observe(&again, operation)?;
                 }
                 Ok(Observation::Absent) => step.failed(ErrorClass::AlreadyExists)?,
