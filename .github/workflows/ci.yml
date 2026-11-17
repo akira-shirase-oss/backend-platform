@@ -62,6 +62,7 @@ jobs:
           if cargo metadata --locked --format-version 1 --no-deps | grep -q '"name":"platform-server"'; then
             ! ARCH_SERVER_BANNED=platform-db scripts/check-architecture.sh
           fi
+          scripts/test-architecture-check.sh
       - name: Images and actions are pinned (T8), and the check can fail
         run: |
           scripts/check-pins.sh

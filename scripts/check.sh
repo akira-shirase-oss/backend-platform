@@ -25,6 +25,9 @@ expect_failure ARCH_DOMAIN_PATTERN='pub fn'
 if cargo metadata --locked --format-version 1 --no-deps | grep -q '"name":"platform-server"'; then
   expect_failure ARCH_SERVER_BANNED=platform-db
 fi
+# ...including when an adapter is plain, optional behind a feature, target-specific or a
+# dev-dependency of platform-server (F3).
+scripts/test-architecture-check.sh
 echo "architecture check proven able to fail"
 
 scripts/check-pins.sh

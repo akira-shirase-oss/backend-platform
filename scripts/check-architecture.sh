@@ -5,7 +5,8 @@
 #     (transitively), and its source names none of std's file, network, process, thread,
 #     environment or clock APIs.
 #  2. platform-server never links the provider adapters or the fake provider (D-013, T1),
-#     through any normal, build or dev dependency.
+#     through any normal, build or dev dependency, under any feature or target
+#     (scripts/test-architecture-check.sh proves each form is caught).
 #  3. platform-server reads no provider setting: its source never mentions BP_PROVIDER.
 #
 # Overrides exist only to prove each rule can fail (scripts/check.sh does that):
@@ -13,14 +14,19 @@
 #   ARCH_DOMAIN_PATTERN='regex'  source pattern banned in the domain
 #   ARCH_SERVER_BANNED="a b"     crates banned from the server's tree
 set -euo pipefail
-cd "$(dirname "$0")/.."
+cd "${ARCH_ROOT:-$(dirname "$0")/..}"
+mode="${ARCH_CARGO_MODE:---locked}"
 
 domain_banned="${ARCH_DOMAIN_BANNED:-tokio tokio-util axum hyper tower tower-http sqlx sqlx-core reqwest mio socket2 libc nix}"
 domain_pattern="${ARCH_DOMAIN_PATTERN:-std::(fs|net|process|env|thread)|SystemTime|Instant::now|stdin\(|stdout\(|println!|eprintln!}"
 server_banned="${ARCH_SERVER_BANNED:-platform-adapters platform-fake-provider platform-worker reqwest}"
 
+# The resolved graph with every feature and every target (F3): an adapter hidden behind
+# `optional = true` + a feature, or under `[target.'cfg(..)'.dependencies]`, is still linked
+# in some build, so it counts.
 tree_of() {
-  cargo tree --locked -p "$1" -e "$2" --prefix none --format '{p}' | awk '{print $1}' | sort -u
+  cargo tree $mode -p "$1" -e "$2" --all-features --target all --prefix none --format '{p}' \
+    | awk '{print $1}' | sort -u
 }
 
 fail=0
@@ -37,7 +43,7 @@ if grep -rnE -- "$domain_pattern" crates/platform-domain/src >/dev/null; then
   fail=1
 fi
 
-if cargo metadata --locked --format-version 1 --no-deps | grep -q '"name":"platform-server"'; then
+if cargo metadata $mode --format-version 1 --no-deps | grep -q '"name":"platform-server"'; then
   server_tree=$(tree_of platform-server normal,build,dev)
   for name in $server_banned; do
     if grep -qx -- "$name" <<<"$server_tree"; then
