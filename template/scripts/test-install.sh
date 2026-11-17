@@ -75,7 +75,13 @@ update-ca-certificates >/dev/null
 run_block check
 
 echo "== what the guide promises, checked"
-check "the service runs as its own user" bash -c '[ "$(ps -o user= -p "$(systemctl show -p MainPID --value starter)")" = starter ]'
+runs_as_its_user() {
+  local pid user
+  pid="$(systemctl show -p MainPID --value starter)"
+  user="$(stat -c %U "/proc/$pid")"
+  [ "$user" = starter ] || { echo "  the main process $pid runs as $user" >&2; return 1; }
+}
+check "the service runs as its own user" runs_as_its_user
 check "no secret is in the unit's environment" bash -c '! systemctl show -p Environment starter | grep -q "postgres://"'
 check "the secrets are root-owned and owner-only" bash -c '[ "$(stat -c %U%a /etc/starter/credentials/database-url)" = root600 ] && [ ! -e /etc/starter/credentials/admin-database-url ]'
 check "the service logs JSON to the journal, with its listen address" \
