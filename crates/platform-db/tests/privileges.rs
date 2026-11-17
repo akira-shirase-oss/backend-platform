@@ -115,3 +115,23 @@ async fn the_startup_guard_accepts_only_the_runtime_role() {
     owner.close().await;
     db.cleanup().await;
 }
+
+/// Every function the schema defines pins its `search_path` (F16), so an object planted
+/// in another schema can never be resolved inside a trigger.
+#[tokio::test]
+async fn schema_functions_pin_their_search_path() {
+    let db = TestDb::new().await;
+    let unpinned: Vec<String> = sqlx::query_scalar(
+        "SELECT p.proname::text FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+          WHERE n.nspname = 'public'
+            AND NOT coalesce('search_path=pg_catalog' = ANY (p.proconfig), false)",
+    )
+    .fetch_all(&db.pool)
+    .await
+    .unwrap();
+    assert!(
+        unpinned.is_empty(),
+        "functions without a pinned search_path: {unpinned:?}"
+    );
+    db.cleanup().await;
+}
