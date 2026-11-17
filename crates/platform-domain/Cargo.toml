@@ -1,0 +1,23 @@
+[package]
+name = "platform-domain"
+description = "The Backend Platform's pure contract: identities, deterministic resource names, the provisioning plan and the operation state machine. No I/O."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+# No I/O crates, ever: scripts/check-architecture.sh fails if tokio, sqlx, axum, hyper,
+# tower, reqwest or similar appear anywhere in this crate's dependency tree, or if its
+# source names std's file, network or process APIs.
+[dependencies]
+serde.workspace = true
+thiserror.workspace = true
+uuid = { version = "1.29", default-features = false, features = ["std", "serde"] }
+
+[dev-dependencies]
+proptest.workspace = true
+serde_json.workspace = true
+
+[lints]
+workspace = true

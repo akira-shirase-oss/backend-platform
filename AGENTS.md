@@ -6,8 +6,9 @@ reviewed OIDC integration, S3-compatible storage, standard containers) —
 never rewritten infrastructure. Contract: the engineering guide
 `09_Backend_Platform.docx` (kept in the maintainer's workspace under
 `docs/Project_Guides/`, not in this repository) — the guide wins on any
-conflict. Status: **parked (future horizon)**; no code exists, and nothing
-starts until the maintainer unparks it. When it starts, B0 comes first.
+conflict. Status: **parked (future horizon); B0 in progress** at the maintainer's
+request (2026-11-16). Nothing past B0 starts until the maintainer unparks
+the project and accepts the B0 memo.
 
 ## Read first
 
@@ -58,8 +59,10 @@ starts until the maintainer unparks it. When it starts, B0 comes first.
 
 ## Rust rules
 
-- `export PATH="$(brew --prefix rustup)/bin:$PATH"` before every cargo
-  command — Homebrew's cargo ignores the workspace pin (Rust 1.99.1).
+- `export PATH="$(brew --prefix rustup)/bin:$PATH"; unset CARGO_TARGET_DIR`
+  before every cargo command — Homebrew's cargo ignores the workspace pin
+  (Rust 1.99.1, `rust-toolchain.toml`; `scripts/check-toolchain.sh` fails on
+  any other rustc).
 - `platform-domain` carries no I/O — enforced like the sibling projects'
   domain crates.
 - Typed errors (`thiserror`) in libraries; `anyhow` only in binaries.

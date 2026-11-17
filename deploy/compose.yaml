@@ -1,0 +1,44 @@
+# Backend Platform local stack: the control database for development, the drills and the
+# load runs. Development and CI only — this is not the self-hosted starter.
+#
+# Its own compose project (`backend-platform`), so it never touches another project's
+# containers. Every port is bound to 127.0.0.1: PostgreSQL on 61432, the platform's own
+# processes on 61400–61499. The credentials below are public development values.
+#
+# The image is pinned by digest (T8). To upgrade, change the tag, look up the new digest
+# with `docker buildx imagetools inspect postgres:<tag>`, and run `scripts/check.sh`.
+name: backend-platform
+
+services:
+  postgres:
+    image: postgres:18.7-trixie@sha256:2ea8630df176ad090ec92136dee850397c5af8781e4bcf2e4162593691c61bbc
+    command:
+      - postgres
+      # Tests run in parallel, each on its own database and pool.
+      - -c
+      - max_connections=300
+      # Lock waits and slow statements are evidence for the load runs.
+      - -c
+      - log_lock_waits=on
+      - -c
+      - deadlock_timeout=50ms
+      - -c
+      - log_min_duration_statement=250ms
+    environment:
+      POSTGRES_USER: platform
+      POSTGRES_PASSWORD: platform-dev
+      POSTGRES_DB: platform
+    ports:
+      - "127.0.0.1:${BP_PG_PORT:-61432}:5432"
+    volumes:
+      - postgres:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD", "pg_isready", "--host=127.0.0.1", "--username=platform", "--dbname=platform"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 60s
+      start_interval: 1s
+
+volumes:
+  postgres:

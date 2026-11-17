@@ -1,11 +1,13 @@
 # Backend Platform
 
-> **Status — parked (future horizon).** Contract documents only; no code.
-> The guide marks this an expansion horizon, not an approved simultaneous
-> build or a commercial offering. Nothing starts until the maintainer
-> unparks it; when that happens, milestone B0 (the evidence memo, CI, the
-> first load scenario and the partial-provisioning drill) is the first step.
-> See `docs/ROADMAP.md`.
+> **Status — parked (future horizon); B0 in progress.** The maintainer asked
+> on 2026-11-16 for development to start on every planned project, so
+> milestone B0 — the evidence memo, CI, the fake provider, the first load
+> scenario and the partial-provisioning drill — is under way. The project
+> stays parked: nothing past B0 starts until the maintainer unparks it (P-1)
+> and accepts the B0 memo (P-2). The guide marks this an expansion horizon,
+> not an approved simultaneous build or a commercial offering. See
+> `docs/ROADMAP.md`.
 
 A self-hosted backend platform in the Appwrite/Supabase direction — one
 developer experience over deployment, identity, data, files, jobs and

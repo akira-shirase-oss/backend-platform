@@ -1,0 +1,18 @@
+[package]
+name = "platform-adapters"
+description = "Provider adapters for the Backend Platform's reconciler. Only the worker links this crate (D-013); platform-server never does."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+platform-domain.workspace = true
+reqwest.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+
+[lints]
+workspace = true
