@@ -66,8 +66,10 @@ jobs:
       - name: Images and actions are pinned (T8), and the check can fail
         run: |
           scripts/check-pins.sh
-          printf 'services:\n  db:\n    image: postgres:18\n' > "$RUNNER_TEMP/unpinned.yaml"
-          ! scripts/check-pins.sh "$RUNNER_TEMP/unpinned.yaml"
+          printf 'services:\n  db:\n    image: postgres:18\n' > "$RUNNER_TEMP/unpinned-image.yaml"
+          ! scripts/check-pins.sh "$RUNNER_TEMP/unpinned-image.yaml"
+          printf 'steps:\n  - uses: actions/checkout@v7\n' > "$RUNNER_TEMP/unpinned-action.yaml"
+          ! scripts/check-pins.sh "$RUNNER_TEMP/unpinned-action.yaml"
       - name: Tests, including drill partial-provision over 10,000 in-process fault schedules
         run: cargo test --workspace --locked
       - name: Drill partial-provision, process level (the real worker killed with SIGKILL)

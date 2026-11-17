@@ -31,14 +31,17 @@ scripts/test-architecture-check.sh
 echo "architecture check proven able to fail"
 
 scripts/check-pins.sh
-# The pin check must be able to fail too.
+# The pin check must be able to fail too: on an image and on an action, each alone (as
+# CI), so a checker that ignored either one is caught.
 unpinned="$(mktemp)"
-printf 'services:\n  db:\n    image: postgres:18\nsteps:\n  - uses: actions/checkout@v7\n' >"$unpinned"
-if scripts/check-pins.sh "$unpinned" >/dev/null 2>&1; then
-  echo "error: the pin check did not catch an unpinned image and action" >&2
-  rm -f "$unpinned"
-  exit 1
-fi
+for sample in 'services:\n  db:\n    image: postgres:18\n' 'steps:\n  - uses: actions/checkout@v7\n'; do
+  printf '%b' "$sample" >"$unpinned"
+  if scripts/check-pins.sh "$unpinned" >/dev/null 2>&1; then
+    echo "error: the pin check did not catch: $sample" >&2
+    rm -f "$unpinned"
+    exit 1
+  fi
+done
 rm -f "$unpinned"
 echo "pin check proven able to fail"
 

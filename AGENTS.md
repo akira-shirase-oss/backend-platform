@@ -20,8 +20,8 @@ B0 starts until the maintainer unparks the project.
    consistency, the control-plane threat model (T1–T10).
 3. `docs/ROADMAP.md` — B0–B7; each milestone's proof gate precedes the
    next; a status cell says *Done* only with named tests and evidence.
-4. `docs/DECISIONS.md` — trade-offs D-001–D-028 and the questions still
-   open.
+4. `docs/DECISIONS.md` — trade-offs and decisions (D-001 onward; read
+   them all, the B0 ones included) and the questions still open.
 
 ## Non-negotiables
 
