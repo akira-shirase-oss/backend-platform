@@ -185,7 +185,7 @@ scripts/rollback.sh --prefix /opt/starter --service starter \
 - **Rehearsal:** `scripts/upgrade-rehearsal.sh` installs vN with data through the API,
   upgrades to vN+1 (this tree plus one real migration), checks the data and a token, shows vN
   and `rollback.sh` refusing the upgraded schema, restores the snapshot, rolls back and checks
-  the data matches the pre-upgrade fingerprint table by table: 24 steps, each passed or failed
+  the data matches the pre-upgrade fingerprint table by table: 23 steps, each passed or failed
   with its time, in the gate. The install test runs the two blocks above on the VM (an
   upgrade with no migration, and a rollback that is allowed).
 

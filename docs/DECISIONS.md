@@ -438,7 +438,7 @@ starting values; changing one needs a measurement and a new entry.
   Rolling back past a migration means restoring the pre-upgrade snapshot, which loses writes
   made since the upgrade. An expand-and-contract window (a schema declaring the oldest
   binary it supports) would avoid that and is not built: a copy adds it when it needs it.
-  Proof: `scripts/upgrade-rehearsal.sh`, 24 steps, in the gate.
+  Proof: `scripts/upgrade-rehearsal.sh`, 23 steps, in the gate.
 
 - **D-041 — Every limit is proven by removing it.** Each bound carries a `// LIMIT(name)`
   marker; `scripts/prove-limits.sh` applies one substitution per marker in a scratch copy and
@@ -464,6 +464,27 @@ starting values; changing one needs a measurement and a new entry.
   bucket drills are written but not run: this repository holds no Neon or bucket
   credentials. The unit's exposure (1.4) was measured offline and in CI, not on a droplet.
   B1-T is *In progress* until the acceptance run is committed.
+
+- **D-044 — The template has no web interface.** The accounts kit is an HTTP API. A
+  product's sign-in pages and dashboard are its own, built on its copy of Colophon's
+  `@colophon/ui` (the workspace's one-stack rule), and carry the interface standard there:
+  every state designed, keyboard access, contrast, 360 and 1440 px, an axe check,
+  screenshots. The template's interface is what a developer touches: a README quickstart run
+  as written in CI (`template/scripts/test-readme.sh`), and scripts that answer `--help` and
+  refuse unknown arguments by pointing at it (`template/scripts/test-help.sh`, 26 scripts).
+
+- **D-045 — The production path is followed end to end in CI.** The operator guide's install,
+  check, upgrade and rollback steps are command blocks, and `template/scripts/test-install.sh`
+  runs them as written on an Ubuntu 24.04 VM with systemd (job `template-install`), then
+  checks what the guide promises: the service as its own user, no secret in the unit's
+  environment, JSON logs, HSTS and the redirect through Caddy, loopback only, no link token in
+  Caddy's log, the installed unit's exposure, an upgrade, a rollback, a draining stop. The
+  VM stands in for a droplet in three stated ways: the development PostgreSQL for Neon,
+  `localhost` with Caddy's own CA (trusted by the test) for a public certificate, and no mail
+  relay. It is not the acceptance run (D-043), which needs a droplet and a hand baseline.
+  Its first runs found two real faults, both fixed: the server held systemd's credential
+  files to the owner-only mode meant for `_FILE` paths, so the unit never became ready; and
+  a copy could not have reached Neon at all (no TLS, D-042). Green since `b721d1e`.
 
 ## Open questions (still open)
 

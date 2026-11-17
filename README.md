@@ -11,10 +11,12 @@
 >
 > The memo's recommendation (stay parked, and build a copyable starter
 > template instead of a control plane) was **accepted with corrections on
-> 2026-11-16** (D-036). The next milestone is **B1-T, the starter
-> template** (`docs/STARTER_TEMPLATE.md`), planned; the control-plane
-> milestones B1–B7 do not start until the maintainer unparks the project
-> (P-1). Still owed for B0: a quiet-machine run of the 100,000-request
+> 2026-11-16** (D-036). **B1-T, the starter template, is in progress**
+> (`template/`, `docs/STARTER_TEMPLATE.md`): items 1–10 are built and
+> tested, the operator guide runs as written on a CI VM, and Durable
+> Runner's acceptance run on a droplet is owed (`docs/B1T_ADOPTION.md`).
+> The control-plane milestones B1–B7 do not start until the maintainer
+> unparks the project (P-1). Still owed for B0: a quiet-machine run of the 100,000-request
 > baseline and the 1,000,000-request run. Both smokes so far ran on a busy
 > laptop and missed their thresholds; both are kept. The guide marks this
 > an expansion horizon, not an approved simultaneous build or a commercial
@@ -56,6 +58,21 @@ platform provisions belongs to one project at a time.
 | drill `partial-provision` | 10,000 randomized fault schedules in process, plus the real worker killed with SIGKILL at every step | `partial_provision.rs`, `kill_drill.rs`: 0 duplicates, 0 orphans |
 | `perf/scenarios/control-api.js` | 80% reads / 20% desired-state writes at a constant arrival rate, the worker reconciling under 0.1% provider faults | `perf/results/` (busy-machine smokes, kept); the full run is owed |
 
+## What exists (B1-T, the starter template)
+
+`template/` is a copyable Rust workspace that a product copies once and owns
+(`scripts/copy-template.sh DEST NAME`; `template/README.md` starts with a quickstart).
+
+| Piece | Proven by |
+|---|---|
+| the bounded accept loop and middleware stack (`starter-http`) | `tests/limits.rs`; each of 16 limits removed in turn fails its test (`template/scripts/prove-limits.sh`, CI job `template-limits`) |
+| owner and runtime roles, the protections manifest, the schema gate (`starter-db`) | 13 weakenings, each refused; a foreign schema refused (exit 4) |
+| the copy-and-own accounts kit (`starter-accounts`) | isolation across workspaces, plan limits under concurrency, sign-in budgets against floods, deletion, the log capture |
+| the health contract, configuration from credentials (`starter-server`) | the real binary's tests; `/readyz` honest within its deadline |
+| Caddy, the hardened unit (exposure 1.4), `harden.sh`, deploy and rollback | the operator guide run as written on Ubuntu 24.04 with systemd (CI job `template-install`) |
+| restore drills (PostgreSQL, SQLite, journal; Neon and bucket written, not run) and the upgrade rehearsal | in the template's gate, with controls; the journal drill against Durable Runner's binaries |
+| the copy step | a renamed copy builds and passes (CI job `template-copy`) |
+
 Commands (Rust 1.99.1 through rustup; see `AGENTS.md`):
 
 ```
@@ -69,8 +86,11 @@ MODE=smoke scripts/load.sh     # the 100,000-request baseline (MODE=full: 1,000,
 - `docs/B0_MEMO.md` — starter template or running control plane? The
   evidence, the threat-surface comparison, verified component versions and
   the recommendation (stay parked), accepted with corrections (D-036)
-- `docs/STARTER_TEMPLATE.md` — the next milestone, B1-T: what the
-  copy-and-own starter template contains and its acceptance test
+- `docs/STARTER_TEMPLATE.md` — B1-T: what the copy-and-own starter template
+  contains, each item's status and proof, and its acceptance test
+- `docs/B1T_ADOPTION.md` — the acceptance test's dry run: Durable Runner and
+  the template, what ran and what adoption changes
+- `template/README.md` — the template itself, from its quickstart
 - `docs/END_GOAL.md` — what done means, scope, invariants, the four
   required failure cases with their drills and pass conditions, the ship
   gate in testable form
@@ -79,7 +99,8 @@ MODE=smoke scripts/load.sh     # the 100,000-request baseline (MODE=full: 1,000,
 - `docs/ROADMAP.md` — B0, B1-T and B1–B7 with per-milestone proof gates
 - `docs/DECISIONS.md` — the guide-seeded trade-offs (D-001–D-010), the
   decisions made before code (D-011–D-028), those made in B0 and its review
-  round (D-029 onward) and the questions still open
+  round (D-029–D-036), those made in B1-T (D-037 onward) and the questions
+  still open
 - `AGENTS.md` — project rules on top of the workspace rules
 
 Contract: the engineering guide `09_Backend_Platform.docx` (kept in the

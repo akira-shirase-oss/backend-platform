@@ -9,9 +9,9 @@ never rewritten infrastructure. Contract: the engineering guide
 conflict. Status: **parked (future horizon); B0 in progress** at the maintainer's
 request (2026-11-16): built and green, with a quiet-machine load baseline
 and the 1,000,000-request run still owed. The memo (`docs/B0_MEMO.md`)
-recommends staying parked; it was accepted with corrections (D-036). The
-next milestone is B1-T, the copy-and-own starter template
-(`docs/STARTER_TEMPLATE.md`). The control-plane milestones B1–B7 do not
+recommends staying parked; it was accepted with corrections (D-036). B1-T, the copy-and-own
+starter template, is in progress under `template/` (`docs/STARTER_TEMPLATE.md`;
+its own workspace and gate, which `scripts/check.sh` also runs). The control-plane milestones B1–B7 do not
 start until the maintainer unparks the project.
 
 ## Read first

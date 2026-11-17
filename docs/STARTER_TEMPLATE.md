@@ -6,8 +6,35 @@ with corrections on 2026-11-16 (D-036). This document is the template's
 contract: what it contains, how each piece is proven, and the acceptance
 test that turns its benefit from a claim into evidence.
 
-**Status: planned.** Nothing here is built yet. The control-plane crates in
-this repository stay parked, and B1–B7 of `ROADMAP.md` do not start.
+**Status: in progress (2026-11-17).** Items 1 to 10 are built under `template/` and
+tested; item 11, the acceptance run, is owed (a droplet and a timed hand baseline;
+`docs/B1T_ADOPTION.md` records the dry run). The control-plane crates in this repository
+stay parked, and B1–B7 of `ROADMAP.md` do not start.
+
+| # | Item | Status | Proven by |
+|---|---|---|---|
+| 1 | Accounts kit | built | `template/crates/starter-accounts/tests/`: `isolation.rs` (A's token, session and member on each of B's routes), `domain::tests` (the plan-limit property test) and `limits.rs` (eight concurrent requests at the edge), `logs.rs` (the log capture, with planted-leak controls), `flows.rs` (invite and verification end to end against a fake SMTP sink), `budgets.rs`, `deletion.rs`. Email: one port and an SMTP adapter to a loopback relay, no provider HTTP adapter. No OIDC: the contract allows one, nothing uses it yet |
+| 2 | Host layer | built; run on a CI VM, not a droplet | `scripts/test-install.sh` (the guide's blocks as written on Ubuntu 24.04 with systemd: `harden.sh apply` and `check`, the unit, Caddy with TLS); the unit's exposure 1.4 (`check-unit.sh`, fails above 2.0); `test-harden-check.sh` (check mode fails on each missing step) |
+| 3 | Configuration and secrets | built | `config.rs` tests (every problem at once; owner-only secret files; `env.example` and the code in step); the log capture over startup and shutdown (`tests/binary.rs`) and over the accounts flows |
+| 4 | Releases | built | `tests/schema.rs` and `tests/binary.rs` (a too-new schema is refused, exit 4); `deploy.sh` refuses a release whose schema is not current; `upgrade-rehearsal.sh`; the install test's upgrade and rollback |
+| 5 | Health contract | built | `tests/health.rs` (`/readyz` 503 within its deadline on a silent or refused database; `/errorz`); Service Monitor's watch is configured per deployment, not yet |
+| 6 | Restore drills | PostgreSQL, SQLite, journal: run; Neon, bucket: written, not run (no credentials) | `scripts/drills/`, with `test-drills.sh` (each fails on a weakened source and on a wrong key backup); the journal drill ran against Durable Runner's binaries |
+| 7 | Upgrade rehearsal | built | `scripts/upgrade-rehearsal.sh`, 23 steps, in the gate |
+| 8 | CI and evidence kit | built | the template's gate and CI, its pin, results and architecture checks with their failure proofs, `prove-limits.sh` (16 limits), the k6 and age installers, `load.sh` with a scenario (its probe runs in CI; no run is committed) |
+| 9 | Observability minimum | built | JSON logs with request ids (`stack.rs`), journald retention, `/errorz`; the alert is Service Monitor's, configured per deployment |
+| 10 | Upkeep | built | `template/docs/COMPONENTS.md`, the pull procedure in `template/docs/COPYING.md`, `scripts/copy-template.sh` (CI job `template-copy`) |
+| 11 | Acceptance | **owed** | `docs/B1T_ADOPTION.md`: the dry run in a scratch copy, what adoption changes, what the run needs |
+
+**Evidence.** Records under `perf/results/`, all from commit `b721d1e` with a clean template
+tree, taken on the busy development machine (load averages 33 to 57; they record steps and
+pass or fail, not capacity): `20261117T142836Z-b1t-prove-limits.json` (16 of 16 proven),
+`-b1t-postgres-restore.json` (12 steps), `-b1t-sqlite-restore.json` (9),
+`-b1t-upgrade-rehearsal.json` (23), `-b1t-journal-restore-durable-runner-9d240a7.json` (9,
+against Durable Runner's own binaries). The operator guide's end-to-end run is CI job
+`template-install`, green since `b721d1e`. Development so far has found and fixed, through
+these runs: the server refusing systemd's own credential files, a copy unable to reach Neon
+(no TLS), names the copy rename missed, a budget test that depended on the machine's speed,
+and an install-test helper that ran no check at all.
 
 ## The model: copy, then own
 

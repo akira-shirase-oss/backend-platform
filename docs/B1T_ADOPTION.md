@@ -20,7 +20,7 @@ a measurement.
 
 | What | Result |
 |---|---|
-| `template/scripts/drills/journal-restore.sh` against `durable-server`, `durable-cli` and the pilot handler: 40 two-step jobs to done, `/admin/backup`, the copy packed and age-encrypted, the key restored from its backup, `durable-cli restore`, a second server replaying it, SIGTERM | **passed**, 9 steps: every run came back with the same id, state and finish time; the restored server drained and exited 0 |
+| `template/scripts/drills/journal-restore.sh` against `durable-server`, `durable-cli` and the pilot handler: 40 two-step jobs to done, `/admin/backup`, the copy packed and age-encrypted, the key restored from its backup, `durable-cli restore`, a second server replaying it, SIGTERM | **passed**, 9 steps: every run came back with the same id, state and finish time; the restored server drained and exited 0. Recorded again at the template's commit `b721d1e` against a fresh build of Durable Runner `9d240a7`: `perf/results/20261117T142836Z-b1t-journal-restore-durable-runner-9d240a7.json` |
 | `crates/starter-http` copied in as `crates/durable-http`, a workspace member | its 20 tests pass after two mechanical changes: the manifest rewritten for Durable Runner's workspace (it has no `[workspace.dependencies]` for hyper, tower or uuid, and is edition 2021: the crate keeps `edition = "2024"`), and `starter_http` renamed. Clippy with `-D warnings` then refuses the tests' `expect` calls: Durable Runner has no `clippy.toml` allowing them in tests |
 | `scripts/check-pins.sh` on Durable Runner's workflow | passes (its actions are SHA-pinned) |
 | `scripts/check-results.sh` on its 22 result files | passes (no host name since its 2026-11-17 fix) |
