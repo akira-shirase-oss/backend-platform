@@ -1,0 +1,37 @@
+[package]
+name = "platform-server"
+description = "The Backend Platform's control API (Axum). Writes desired state and operations; holds no provider credential and never links the adapters (D-013)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "platform-server"
+path = "src/main.rs"
+
+# Never platform-adapters, platform-worker or the fake provider, not even as a
+# dev-dependency: scripts/check-architecture.sh fails if one appears (T1).
+[dependencies]
+anyhow.workspace = true
+axum.workspace = true
+platform-db.workspace = true
+platform-domain.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sqlx.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tower.workspace = true
+tower-http.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+http-body-util.workspace = true
+platform-db = { workspace = true, features = ["test-support"] }
+
+[lints]
+workspace = true

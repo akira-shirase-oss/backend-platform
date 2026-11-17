@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/platform-domain", "crates/platform-db", "crates/platform-adapters", "crates/platform-worker", "fixtures/fake-provider"]
+members = ["crates/*", "fixtures/fake-provider"]
 resolver = "3"
 
 [workspace.package]

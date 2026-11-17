@@ -3,7 +3,7 @@
 # warnings denied (fault-injection build included), the architecture rules and proof that
 # each can fail, every test against PostgreSQL (this starts the local stack when
 # BP_TEST_DATABASE_URL is unset), the partial-provisioning drill (10,000 in-process
-# schedules and the process-level kill -9 cases), then cargo-deny.
+# schedules and the process-level kill -9 cases), a short load probe, then cargo-deny.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -35,6 +35,14 @@ export BP_TEST_DATABASE_URL
 cargo test --workspace --locked
 # Drill partial-provision, process level: the real worker binary killed with SIGKILL.
 cargo test -p platform-worker --features fault-injection --test kill_drill --locked
+
+# The control-API load scenario, as a short probe (never committed as evidence).
+if command -v k6 >/dev/null 2>&1; then
+  TOTAL=2000 RATE=200 PROJECTS=100 scripts/load.sh >/dev/null
+  echo "load probe ok"
+else
+  echo "note: k6 not installed (scripts/install-k6.sh); load probe skipped locally (CI runs it)"
+fi
 
 # cargo installs tools into ~/.cargo/bin, which may be missing from PATH (after rustup's).
 [ -d "$HOME/.cargo/bin" ] && PATH="$PATH:$HOME/.cargo/bin"
