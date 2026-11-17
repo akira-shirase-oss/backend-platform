@@ -111,10 +111,9 @@ async fn a_lease_fences_out_its_previous_holder() {
     let db = TestDb::new().await;
     admit(&db, "shop", &desired(&["main"]), None).await.unwrap();
     let (w1, w2) = (Uuid::now_v7(), Uuid::now_v7());
-    let mut first = log::claim(&db.pool, w1, Duration::from_millis(100))
-        .await
-        .unwrap()
-        .unwrap();
+    // Held under a long lease (so a slow machine cannot expire it between the two claims),
+    // then shortened by the save below and waited out.
+    let mut first = log::claim(&db.pool, w1, LEASE).await.unwrap().unwrap();
     assert!(
         log::claim(&db.pool, w2, LEASE).await.unwrap().is_none(),
         "lease held"
@@ -132,7 +131,7 @@ async fn a_lease_fences_out_its_previous_holder() {
         .await
         .unwrap()
     );
-    tokio::time::sleep(Duration::from_millis(250)).await;
+    tokio::time::sleep(Duration::from_millis(400)).await;
     // The lease expired: another worker takes over and resumes the recorded state.
     let second = log::claim(&db.pool, w2, LEASE).await.unwrap().unwrap();
     assert_eq!(second.lease.token, first.lease.token + 1);
