@@ -27,6 +27,11 @@ pub(crate) struct StepRow {
 pub(crate) const STEP_COLUMNS: &str = "position, kind, logical_name, provider_name, spec, state, \
      attempts, resource_id, adopted, block_reason, last_error";
 
+/// The same columns from a join, qualified by the `s` alias.
+pub(crate) const STEP_COLUMNS_QUALIFIED: &str = "s.position, s.kind, s.logical_name, \
+     s.provider_name, s.spec, s.state, s.attempts, s.resource_id, s.adopted, s.block_reason, \
+     s.last_error";
+
 fn corrupt(what: &str, detail: impl std::fmt::Display) -> DbError {
     DbError::Corrupt(format!("{what}: {detail}"))
 }

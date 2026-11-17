@@ -28,7 +28,7 @@ pub enum ApiError {
     #[error("the server is at capacity; retry shortly")]
     Overloaded,
     #[error("the control plane cannot manage right now")]
-    Unavailable,
+    Unavailable(#[source] Option<DbError>),
     #[error("internal error")]
     Internal(#[source] anyhow::Error),
 }
@@ -44,7 +44,7 @@ impl ApiError {
             Self::IdempotencyConflict => (StatusCode::CONFLICT, "idempotency_conflict"),
             Self::Conflict { code, .. } => (StatusCode::CONFLICT, code),
             Self::Overloaded => (StatusCode::SERVICE_UNAVAILABLE, "overloaded"),
-            Self::Unavailable => (StatusCode::SERVICE_UNAVAILABLE, "control_plane_unavailable"),
+            Self::Unavailable(_) => (StatusCode::SERVICE_UNAVAILABLE, "control_plane_unavailable"),
             Self::Internal(_) => (StatusCode::INTERNAL_SERVER_ERROR, "internal"),
         }
     }
@@ -75,7 +75,13 @@ impl IntoResponse for ApiError {
             Self::Internal(error) => {
                 tracing::error!(error = format!("{error:#}"), "internal error");
             }
-            Self::Unavailable => tracing::warn!("control database unavailable"),
+            Self::Unavailable(Some(cause)) => {
+                tracing::warn!(
+                    cause = platform_db::chain(cause),
+                    "control database unavailable"
+                );
+            }
+            Self::Unavailable(None) => tracing::warn!("control database unavailable"),
             _ => {}
         }
         envelope(status, code, &self.to_string())
@@ -85,7 +91,7 @@ impl IntoResponse for ApiError {
 impl From<DbError> for ApiError {
     fn from(error: DbError) -> Self {
         if error.is_unavailable() {
-            Self::Unavailable
+            Self::Unavailable(Some(error))
         } else {
             Self::Internal(error.into())
         }

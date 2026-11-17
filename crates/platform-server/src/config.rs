@@ -73,7 +73,9 @@ impl Default for Config {
             admin_token: Secret(String::new()),
             max_body_bytes: 16 * 1024,
             request_timeout: Duration::from_millis(2_000),
-            max_in_flight: 512,
+            // Four times the pool: beyond that a request would only queue for a
+            // connection, so it is shed at once instead (T10, measured 2026-11-16).
+            max_in_flight: 128,
             db_max_connections: 32,
             migrate_on_start: true,
             shutdown_grace: Duration::from_millis(10_000),

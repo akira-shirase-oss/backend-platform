@@ -21,7 +21,7 @@ use uuid::Uuid;
 
 use crate::DbError;
 use crate::desired::MAX_IN_FLIGHT_PER_PROJECT;
-use crate::rows::{STEP_COLUMNS, StepColumns, StepRow};
+use crate::rows::{STEP_COLUMNS, STEP_COLUMNS_QUALIFIED, StepColumns, StepRow};
 
 /// The right to write one operation's steps.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -54,7 +54,8 @@ pub async fn claim(
     worker: Uuid,
     lease_for: Duration,
 ) -> Result<Option<Claimed>, DbError> {
-    let row = sqlx::query_as::<_, (Uuid, String, i64, i32, i64)>(
+    // One round trip: pick, lease, log the claim and return the recorded steps.
+    let rows = sqlx::query_as::<_, ClaimRow>(sqlx::AssertSqlSafe(format!(
         "WITH candidate AS (
              SELECT o.id FROM operations o
               WHERE o.state IN ('pending', 'running')
@@ -77,21 +78,32 @@ pub async fn claim(
              INSERT INTO operation_events (operation_id, event, lease_token)
              SELECT id, 'claimed', lease_token FROM claimed
          )
-         SELECT id, project, revision, round, lease_token FROM claimed",
-    )
+         SELECT c.id AS op_id, c.project AS op_project, c.revision AS op_revision,
+                c.round AS op_round, c.lease_token AS op_token, {STEP_COLUMNS_QUALIFIED}
+           FROM claimed c JOIN operation_steps s ON s.operation_id = c.id
+          ORDER BY s.position"
+    )))
     .bind(worker)
     .bind(millis(lease_for))
-    .fetch_optional(pool)
+    .fetch_all(pool)
     .await?;
-    let Some((id, project, revision, round, token)) = row else {
+    let Some(first) = rows.first() else {
         return Ok(None);
     };
-    let steps = load_steps(pool, id).await?;
+    let (id, token) = (first.op_id, first.op_token);
+    let project =
+        ProjectId::parse(&first.op_project).map_err(|e| DbError::Corrupt(e.to_string()))?;
+    let revision = u64::try_from(first.op_revision).map_err(|e| DbError::Corrupt(e.to_string()))?;
+    let round = u16::try_from(first.op_round).map_err(|e| DbError::Corrupt(e.to_string()))?;
+    let steps = rows
+        .into_iter()
+        .map(|row| row.step.into_step())
+        .collect::<Result<Vec<_>, _>>()?;
     let operation = Operation {
         id: OperationId(id),
-        project: ProjectId::parse(&project).map_err(|e| DbError::Corrupt(e.to_string()))?,
-        revision: u64::try_from(revision).map_err(|e| DbError::Corrupt(e.to_string()))?,
-        round: u16::try_from(round).map_err(|e| DbError::Corrupt(e.to_string()))?,
+        project,
+        revision,
+        round,
         state: OperationState::Running,
         steps,
     };
@@ -103,6 +115,17 @@ pub async fn claim(
         },
         operation,
     }))
+}
+
+#[derive(Debug, sqlx::FromRow)]
+struct ClaimRow {
+    op_id: Uuid,
+    op_project: String,
+    op_revision: i64,
+    op_round: i32,
+    op_token: i64,
+    #[sqlx(flatten)]
+    step: StepRow,
 }
 
 async fn load_steps<'e>(
@@ -265,6 +288,10 @@ struct OperationRow {
 
 async fn summary_of(pool: &PgPool, row: OperationRow) -> Result<OperationSummary, DbError> {
     let steps = load_steps(pool, row.id).await?;
+    summarize(row, steps)
+}
+
+fn summarize(row: OperationRow, steps: Vec<Step>) -> Result<OperationSummary, DbError> {
     let state = OperationState::parse(&row.state)
         .ok_or_else(|| DbError::Corrupt(format!("operation state {}", row.state)))?;
     let operation = Operation {
@@ -306,18 +333,51 @@ async fn summary_of(pool: &PgPool, row: OperationRow) -> Result<OperationSummary
 
 const OPERATION_COLUMNS: &str = "id, project, revision, round, state, created_at, updated_at";
 
-/// One operation with its steps and derived status.
+/// One operation with its steps and derived status, in one round trip.
 pub async fn get(pool: &PgPool, id: OperationId) -> Result<Option<OperationSummary>, DbError> {
-    let row = sqlx::query_as::<_, OperationRow>(sqlx::AssertSqlSafe(format!(
-        "SELECT {OPERATION_COLUMNS} FROM operations WHERE id = $1"
+    let rows = sqlx::query_as::<_, OperationStepRow>(sqlx::AssertSqlSafe(format!(
+        "SELECT o.id AS op_id, o.project AS op_project, o.revision AS op_revision,
+                o.round AS op_round, o.state AS op_state, o.created_at AS op_created_at,
+                o.updated_at AS op_updated_at, {STEP_COLUMNS_QUALIFIED}
+           FROM operations o JOIN operation_steps s ON s.operation_id = o.id
+          WHERE o.id = $1
+          ORDER BY s.position"
     )))
     .bind(id.0)
-    .fetch_optional(pool)
+    .fetch_all(pool)
     .await?;
-    match row {
-        Some(row) => Ok(Some(summary_of(pool, row).await?)),
-        None => Ok(None),
+    let mut rows = rows.into_iter();
+    let Some(first) = rows.next() else {
+        return Ok(None);
+    };
+    let op = OperationRow {
+        id: first.op_id,
+        project: first.op_project,
+        revision: first.op_revision,
+        round: first.op_round,
+        state: first.op_state,
+        created_at: first.op_created_at,
+        updated_at: first.op_updated_at,
+    };
+    let mut steps = vec![first.step.into_step()?];
+    for row in rows {
+        steps.push(row.step.into_step()?);
     }
+    Ok(Some(summarize(op, steps)?))
+}
+
+// Operation columns carry an `op_` prefix: the step columns share names (`state`).
+#[derive(Debug, sqlx::FromRow)]
+struct OperationStepRow {
+    op_id: Uuid,
+    op_project: String,
+    op_revision: i64,
+    op_round: i32,
+    op_state: String,
+    op_created_at: OffsetDateTime,
+    op_updated_at: OffsetDateTime,
+    #[sqlx(flatten)]
+    step: StepRow,
 }
 
 /// The project's newest operation.

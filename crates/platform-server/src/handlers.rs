@@ -28,7 +28,7 @@ pub async fn readyz(State(state): State<AppState>) -> Response {
     let probe = sqlx::query("SELECT 1").execute(&state.db);
     match tokio::time::timeout(Duration::from_millis(500), probe).await {
         Ok(Ok(_)) => Json(json!({ "status": "ready" })).into_response(),
-        _ => ApiError::Unavailable.into_response(),
+        _ => ApiError::Unavailable(None).into_response(),
     }
 }
 

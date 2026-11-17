@@ -42,6 +42,19 @@ impl From<sqlx::Error> for DbError {
     }
 }
 
+/// An error and its sources, `: `-joined, for the one log line where it is handled.
+/// (sqlx errors carry no credentials: connection strings are never part of them.)
+pub fn chain(error: &dyn std::error::Error) -> String {
+    let mut text = error.to_string();
+    let mut source = error.source();
+    while let Some(cause) = source {
+        text.push_str(": ");
+        text.push_str(&cause.to_string());
+        source = cause.source();
+    }
+    text
+}
+
 impl DbError {
     /// True when retrying later may succeed.
     pub fn is_unavailable(&self) -> bool {

@@ -20,7 +20,7 @@ pub mod testing;
 pub use desired::{
     Admitted, MAX_IN_FLIGHT_PER_PROJECT, ObservedRow, ProjectStatus, project_status, put_desired,
 };
-pub use error::{AdmitError, DbError};
+pub use error::{AdmitError, DbError, chain};
 pub use log::{Claimed, Lease, OperationCounts, OperationSummary, RetryError, StepView};
 pub use pool::{PoolSettings, connect_lazy, connect_options};
 

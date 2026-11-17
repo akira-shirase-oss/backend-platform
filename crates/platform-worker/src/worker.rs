@@ -87,7 +87,7 @@ async fn task_loop<L: OperationLog, P: Provider, H: Hooks>(
                     }
                     Err(error) => {
                         // The lease expires and the operation resumes from its recorded steps.
-                        tracing::error!(%operation, error = %error, "reconcile stopped");
+                        tracing::error!(%operation, error = platform_db::chain(&error), "reconcile stopped");
                         pause(cancel, Duration::from_millis(200)).await;
                     }
                 }
@@ -98,7 +98,10 @@ async fn task_loop<L: OperationLog, P: Provider, H: Hooks>(
                 idle = (idle * 2).min(config.poll_idle_max);
             }
             Err(error) => {
-                tracing::warn!(error = %error, "claim failed; backing off");
+                tracing::warn!(
+                    error = platform_db::chain(&error),
+                    "claim failed; backing off"
+                );
                 pause(cancel, Duration::from_millis(250)).await;
             }
         }
