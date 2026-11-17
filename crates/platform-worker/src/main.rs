@@ -31,6 +31,11 @@ async fn main() -> anyhow::Result<()> {
     };
     let pool = platform_db::connect_lazy(config.database_url.expose(), &settings)
         .context("configuring the pool")?;
+    // Refuse to run as a role that could rewrite the operation log (F1).
+    platform_db::guard::ensure_at_startup(&pool, Duration::from_secs(30))
+        .await
+        .map_err(|e| anyhow::anyhow!(platform_db::chain(&e)))
+        .context("checking the runtime role")?;
     let provider = HttpProvider::new(&HttpProviderConfig {
         base_url: config.provider_url.clone(),
         connect_timeout: Duration::from_millis(500),

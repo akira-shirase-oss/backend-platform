@@ -55,8 +55,6 @@ pub struct Config {
     pub max_in_flight: usize,
     /// Pool size.
     pub db_max_connections: u32,
-    /// Apply migrations at startup.
-    pub migrate_on_start: bool,
     /// How long shutdown drains.
     pub shutdown_grace: Duration,
     /// Log filter.
@@ -77,7 +75,6 @@ impl Default for Config {
             // connection, so it is shed at once instead (T10, measured 2026-11-16).
             max_in_flight: 128,
             db_max_connections: 32,
-            migrate_on_start: true,
             shutdown_grace: Duration::from_millis(10_000),
             log_filter: "info".to_owned(),
             log_format: LogFormat::Text,
@@ -116,14 +113,6 @@ impl Config {
                 "BP_ADMIN_TOKEN is required: at least {MIN_ADMIN_TOKEN_LEN} printable characters"
             ));
         }
-        let migrate_on_start = match var("BP_MIGRATE_ON_START").as_deref() {
-            None | Some("true" | "1") => true,
-            Some("false" | "0") => false,
-            Some(_) => {
-                errors.push("BP_MIGRATE_ON_START must be true or false".to_owned());
-                true
-            }
-        };
         let log_format = match var("BP_LOG_FORMAT").as_deref() {
             None | Some("text") => LogFormat::Text,
             Some("json") => LogFormat::Json,
@@ -148,7 +137,6 @@ impl Config {
                 defaults.db_max_connections,
                 &mut errors,
             ),
-            migrate_on_start,
             shutdown_grace: Duration::from_millis(parse(
                 "BP_SHUTDOWN_GRACE_MS",
                 10_000,

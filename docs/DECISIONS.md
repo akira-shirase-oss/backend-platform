@@ -267,6 +267,30 @@ starting values; changing one needs a measurement and a new entry.
   supplying. The memo lists what would change the answer. It awaits the
   maintainer's acceptance (P-2).
 
+- **D-034 — Three database roles; the runtime role cannot rewrite the log.**
+  - An administrator creates two roles and the database
+    (`platform-dbctl bootstrap`).
+  - `platform_owner` owns the schema and runs the migrations
+    (`platform-dbctl migrate`).
+  - The server and the worker run as `platform_app`:
+    - it is not a superuser and has no `CREATEROLE`, `CREATEDB`,
+      `REPLICATION` or `BYPASSRLS`;
+    - it owns nothing, and has no `TEMP` on the database and no `CREATE` on
+      the schema;
+    - on `operation_events` it holds only `SELECT` and `INSERT`.
+
+  The triggers that refuse `UPDATE`, `DELETE` and `TRUNCATE` are `ENABLE
+  ALWAYS`, so replica mode does not silence them either. Both processes
+  check their role at startup and refuse to run as anything broader
+  (`platform_db::guard`); the server no longer migrates. Reason: before
+  this, the runtime role was a superuser and the table owner, and replica
+  mode, `DISABLE TRIGGER` or `DROP TRIGGER` all bypassed "append-only"
+  (review finding F1, tested in `crates/platform-db/tests/privileges.rs`).
+  Cost: deployment needs an administrator step before the first migration,
+  and a superuser can still drop the triggers. That is the accepted
+  "organization admin is trusted" risk, which the T5 audit in B1 must
+  record.
+
 ## Open questions (still open)
 
 These need the maintainer or an outside party; each is in the README's

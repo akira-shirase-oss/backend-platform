@@ -1,4 +1,4 @@
-//! `platform-server`: load config, connect, migrate, serve, drain.
+//! `platform-server`: load config, connect, check the runtime role, serve, drain.
 
 use std::time::Duration;
 
@@ -28,9 +28,12 @@ async fn main() -> anyhow::Result<()> {
     };
     let db = platform_db::connect_lazy(config.database_url.expose(), &settings)
         .context("configuring the pool")?;
-    if config.migrate_on_start {
-        migrate(&db).await?;
-    }
+    // The server never migrates (`platform-dbctl migrate` does, as the owner) and refuses
+    // to run as a role that could rewrite the operation log (F1).
+    platform_db::guard::ensure_at_startup(&db, Duration::from_secs(30))
+        .await
+        .map_err(|e| anyhow::anyhow!(platform_db::chain(&e)))
+        .context("checking the runtime role")?;
     let listener = TcpListener::bind(config.listen)
         .await
         .with_context(|| format!("binding {}", config.listen))?;
@@ -48,22 +51,4 @@ async fn main() -> anyhow::Result<()> {
     }
     db.close().await;
     Ok(())
-}
-
-/// Applies migrations, retrying while the database starts, for at most 30 s.
-async fn migrate(db: &sqlx::PgPool) -> anyhow::Result<()> {
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
-    let mut delay = Duration::from_millis(200);
-    loop {
-        match tokio::time::timeout(Duration::from_secs(20), platform_db::MIGRATOR.run(db)).await {
-            Ok(Ok(())) => return Ok(()),
-            Ok(Err(error)) if tokio::time::Instant::now() + delay < deadline => {
-                tracing::warn!(%error, "migrations failed; retrying");
-            }
-            Ok(Err(error)) => return Err(error).context("applying migrations"),
-            Err(_) => anyhow::bail!("applying migrations exceeded 20 s"),
-        }
-        tokio::time::sleep(delay).await;
-        delay = (delay * 2).min(Duration::from_secs(2));
-    }
 }

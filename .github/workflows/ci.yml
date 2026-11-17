@@ -73,7 +73,7 @@ jobs:
         run: cargo test -p platform-worker --features fault-injection --test kill_drill --locked
       - name: Load probe (a short control-API run; the smoke and full runs are local, under perf/results/)
         env:
-          BP_LOAD_DATABASE_URL: postgres://platform:platform-dev@127.0.0.1:61432/platform
+          BP_LOAD_ADMIN_URL: postgres://platform:platform-dev@127.0.0.1:61432/platform
         run: |
           scripts/install-k6.sh "$RUNNER_TEMP/bin"
           PATH="$RUNNER_TEMP/bin:$PATH" TOTAL=2000 RATE=200 PROJECTS=100 scripts/load.sh

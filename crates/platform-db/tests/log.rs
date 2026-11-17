@@ -6,7 +6,7 @@
 
 use std::time::Duration;
 
-use platform_db::testing::TestDb;
+use platform_db::testing::{Role, TestDb};
 use platform_db::{AdmitError, MAX_IN_FLIGHT_PER_PROJECT, RetryError, log, put_desired};
 use platform_domain::{
     DesiredState, ErrorClass, LogicalName, OperationId, OperationState, Plan, ProjectId,
@@ -205,21 +205,25 @@ async fn one_project_reconciles_one_operation_at_a_time_in_order() {
     db.cleanup().await;
 }
 
+/// The trigger layer: even the owner, which holds every table right, cannot rewrite the
+/// log (the runtime role is refused earlier, by privileges: tests/privileges.rs).
 #[tokio::test]
 async fn the_event_log_is_append_only() {
     let db = TestDb::new().await;
     admit(&db, "shop", &desired(&["main"]), None).await.unwrap();
+    let owner = db.connect_as(Role::Owner).await;
     for statement in [
         "UPDATE operation_events SET event = 'forged'",
         "DELETE FROM operation_events",
         "TRUNCATE operation_events",
     ] {
-        let error = sqlx::query(statement).execute(&db.pool).await.unwrap_err();
+        let error = sqlx::query(statement).execute(&owner).await.unwrap_err();
         assert!(
             error.to_string().contains("append-only"),
             "{statement}: {error}"
         );
     }
+    owner.close().await;
     db.cleanup().await;
 }
 

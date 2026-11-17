@@ -45,7 +45,7 @@ platform provisions belongs to one project at a time.
 | Piece | What it is | Proven by |
 |---|---|---|
 | `crates/platform-domain` | deterministic provider names (D-016), the plan, the operation/step state machine; no I/O | unit and property tests; `scripts/check-architecture.sh` (shown able to fail) |
-| `crates/platform-db` | the control-DB operation log on PostgreSQL: admission bounds, idempotency keys, leases with fencing tokens, one-statement step writes, an append-only event log, observed resources | `crates/platform-db/tests/log.rs` |
+| `crates/platform-db` | the control-DB operation log on PostgreSQL: admission bounds, idempotency keys, leases with fencing tokens, one-statement step writes, an append-only event log that the runtime role cannot rewrite (D-034), observed resources; `platform-dbctl` bootstraps the roles and migrates | `crates/platform-db/tests/log.rs`, `privileges.rs` |
 | `crates/platform-adapters` | the provider port and the HTTP adapter; linked only by the worker | architecture check: `platform-server` links no adapter (T1) |
 | `crates/platform-worker` | the reconciler: observe before every create, intent committed before every provider call | drill `partial-provision` (below) |
 | `crates/platform-server` | the control API: desired state, operations, status; 503 `control_plane_unavailable` when the control DB is down | `crates/platform-server/tests/api.rs` |
@@ -56,7 +56,7 @@ platform provisions belongs to one project at a time.
 Commands (Rust 1.99.1 through rustup; see `AGENTS.md`):
 
 ```
-scripts/stack.sh up            # PostgreSQL for development on 127.0.0.1:61432
+scripts/stack.sh up            # PostgreSQL on 127.0.0.1:61432; roles and the bp_dev database, migrated
 scripts/check.sh               # what CI runs: fmt, clippy, architecture and pin checks, tests, drills, load probe, cargo deny
 MODE=smoke scripts/load.sh     # the 100,000-request baseline (MODE=full: 1,000,000, quiet machine only)
 ```

@@ -5,12 +5,16 @@
 //! - [`log`]: the operation log the reconciler works from — claim under a lease, fenced
 //!   step saves, finish, retry.
 //! - [`pool`]: the bounded pool with per-statement deadlines.
+//! - [`bootstrap`] and [`guard`]: the owner and runtime roles, and the startup check that
+//!   the runtime role cannot rewrite the operation log.
 //!
 //! No transaction here ever spans a provider call: the worker commits intent (a begun
 //! attempt) before it calls a provider, and records the result in a later statement.
 
+pub mod bootstrap;
 pub mod desired;
 pub mod error;
+pub mod guard;
 pub mod log;
 pub mod pool;
 mod rows;

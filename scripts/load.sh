@@ -16,7 +16,8 @@
 # green. Results go to perf/results/ in both modes.
 #
 # Needs: k6 (scripts/install-k6.sh), jq, curl, and docker for the local stack (or
-# BP_LOAD_DATABASE_URL naming an empty database).
+# BP_LOAD_ADMIN_URL naming an administrator that may create roles and databases). The
+# run's database (bp_load_<timestamp>) is dropped at the end.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -27,18 +28,24 @@ server_port=61400
 fake_port=61410
 case "$mode" in smoke|full) ;; *) echo "MODE must be smoke or full" >&2; exit 2 ;; esac
 
-cargo build --release --locked -p platform-server -p platform-worker -p platform-fake-provider >/dev/null
+cargo build --release --locked -p platform-server -p platform-worker -p platform-fake-provider -p platform-db >/dev/null
 stamp="$(date -u +%Y%m%dT%H%M%SZ)"
-# A fresh control database per run in the local stack; CI passes its own (BP_LOAD_DATABASE_URL).
-db=""
-if [ -n "${BP_LOAD_DATABASE_URL:-}" ]; then
-  db_url="$BP_LOAD_DATABASE_URL"
-else
+# A fresh control database per run, set up as in production: the administrator creates the
+# roles and the database, the owner migrates, the server and worker run as the runtime role.
+# CI passes its own administrator URL (BP_LOAD_ADMIN_URL); locally it is the stack's.
+if [ -z "${BP_LOAD_ADMIN_URL:-}" ]; then
   scripts/stack.sh up >/dev/null
-  db="bp_load_$(date -u +%Y%m%d%H%M%S)"
-  docker compose -f deploy/compose.yaml exec -T postgres psql -q -U platform -d platform -c "CREATE DATABASE $db" >/dev/null
-  db_url="postgres://platform:platform-dev@127.0.0.1:61432/$db"
 fi
+admin_url="${BP_LOAD_ADMIN_URL:-postgres://platform:platform-dev@127.0.0.1:61432/platform}"
+db="bp_load_$(date -u +%Y%m%d%H%M%S)"
+# Roles are cluster-wide: use the stack's public development passwords, never per-run ones.
+owner_pw=platform-owner-dev
+app_pw=platform-app-dev
+BP_ADMIN_DATABASE_URL="$admin_url" BP_DATABASE_NAME="$db" BP_OWNER_PASSWORD="$owner_pw" BP_APP_PASSWORD="$app_pw" \
+  ./target/release/platform-dbctl bootstrap >/dev/null
+host_part="${admin_url#*://}"; host_part="${host_part#*@}"; host_part="${host_part%%/*}"
+BP_MIGRATION_DATABASE_URL="postgres://platform_owner:${owner_pw}@${host_part}/${db}" ./target/release/platform-dbctl migrate >/dev/null
+db_url="postgres://platform_app:${app_pw}@${host_part}/${db}"
 mkdir -p perf/results target/perf
 summary="$(mktemp)"
 token="load-$(od -An -N24 -tx1 /dev/urandom | tr -d ' \n')"
@@ -148,7 +155,7 @@ jq -n \
   }' >"$out"
 echo "result: $out"
 jq '{mode, commit, thresholds_passed, requests, requests_per_second, failed_rate, admission_refused_rate, dropped_iterations, latency_ms_by_kind, convergence, machine: {load_average_before: .machine.load_average_before, busy_machine: .machine.busy_machine}}' "$out"
-if [ -n "$db" ]; then
-  docker compose -f deploy/compose.yaml exec -T postgres psql -q -U platform -d platform -c "DROP DATABASE IF EXISTS $db WITH (FORCE)" >/dev/null || true
-fi
+kill "$server" "$worker" "$fake" 2>/dev/null || true
+wait "$server" "$worker" 2>/dev/null || true
+BP_ADMIN_DATABASE_URL="$admin_url" BP_DATABASE_NAME="$db" ./target/release/platform-dbctl drop >/dev/null || true
 if [ "$k6_status" -ne 0 ] || [ "$invariants_ok" != "true" ]; then exit 1; fi
