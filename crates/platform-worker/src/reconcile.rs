@@ -35,6 +35,9 @@ pub enum Point {
     AfterBegin,
     /// The lookup returned; nothing else happened.
     AfterLookup,
+    /// The lease check for the create passed; the create is not yet sent (the residual
+    /// window of D-029).
+    BeforeCreate,
     /// The create returned (its effect applied); the result is not recorded.
     AfterCreate,
     /// The round's finish is committed.
@@ -43,9 +46,10 @@ pub enum Point {
 
 impl Point {
     /// Every point.
-    pub const ALL: [Self; 4] = [
+    pub const ALL: [Self; 5] = [
         Self::AfterBegin,
         Self::AfterLookup,
+        Self::BeforeCreate,
         Self::AfterCreate,
         Self::AfterFinish,
     ];
@@ -55,6 +59,7 @@ impl Point {
         match self {
             Self::AfterBegin => "after-begin",
             Self::AfterLookup => "after-lookup",
+            Self::BeforeCreate => "before-create",
             Self::AfterCreate => "after-create",
             Self::AfterFinish => "after-finish",
         }
@@ -203,6 +208,7 @@ async fn attempt<P: Provider, H: Hooks>(
         return Ok(());
     };
     lease.check(config.call_timeout)?;
+    hooks.at(Point::BeforeCreate, position, attempt).await?;
     let created = call(config.call_timeout, provider.create(&request)).await;
     hooks.at(Point::AfterCreate, position, attempt).await?;
     match created {

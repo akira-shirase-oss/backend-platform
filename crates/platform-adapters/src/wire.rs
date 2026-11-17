@@ -32,6 +32,10 @@ pub struct CreateBody {
     pub spec: ResourceSpec,
     /// The creating operation.
     pub tag: OperationId,
+    /// De-duplication key; a provider that supports keys returns the first resource made
+    /// with it instead of making another. Empty means none.
+    #[serde(default)]
+    pub idempotency_key: String,
 }
 
 /// A create reply.

@@ -236,7 +236,14 @@ starting values; changing one needs a measurement and a new entry.
   applies a request late can still let a stale create land after a
   successor's lookup. Name uniqueness (`CREATE DATABASE`, bucket and realm
   names) closes the window on providers that enforce it. On providers that
-  do not, the request must carry an idempotency key.
+  do not, it is closed by the idempotency key every create carries:
+  `<operation>/<position>`, the same for every attempt, round and worker of
+  the step. The fake honors keys when asked (`honor_idempotency_keys`);
+  `a_stale_create_in_the_residual_window_is_deduplicated_by_its_key` showed
+  a duplicate before keys were sent. A provider with neither uniqueness nor
+  keys cannot be made duplicate-free by any reconciler. For such a provider
+  the platform's duty is to see and report the duplicate (D-035), and no
+  such provider should be adopted without one of the two.
 
 - **D-030 — The fake provider allows duplicate names.** By default, a
   create always makes a new resource with a fresh id. So the

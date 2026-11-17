@@ -92,6 +92,7 @@ async fn create(
         name: body.name,
         spec: body.spec,
         tag: body.tag,
+        idempotency_key: body.idempotency_key,
     };
     let reply = app.fake.create_now(&request);
     deliver(app.hang, reply, |id| {

@@ -122,6 +122,7 @@ impl Provider for HttpProvider {
             name: request.name.clone(),
             spec: request.spec.clone(),
             tag: request.tag,
+            idempotency_key: request.idempotency_key.clone(),
         };
         let response = self
             .client

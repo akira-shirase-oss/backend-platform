@@ -159,6 +159,10 @@ pub struct CreateRequest {
     pub spec: ResourceSpec,
     /// The creating operation, written onto the resource where the provider supports it.
     pub tag: OperationId,
+    /// Sent to providers that de-duplicate creates by key: `<operation>/<position>`, the
+    /// same for every attempt, round and worker of this step, so a stale create from a
+    /// paused or slow attempt is recognised as the same create (D-029).
+    pub idempotency_key: String,
 }
 
 /// What the worker does after an observation.
@@ -246,6 +250,7 @@ impl Step {
                 name: self.resource.name.clone(),
                 spec: self.resource.spec.clone(),
                 tag: operation,
+                idempotency_key: format!("{operation}/{}", self.position),
             })),
             Observation::Present(found) if found.spec == self.resource.spec => {
                 self.state = StepState::Done {
@@ -507,6 +512,35 @@ mod tests {
         op.finish(OperationOutcome::Succeeded).unwrap();
         assert_eq!(op.status(), "succeeded");
         assert!(op.finish(OperationOutcome::Succeeded).is_err());
+    }
+
+    #[test]
+    fn the_idempotency_key_is_stable_across_attempts_and_rounds() {
+        let mut op = op();
+        let policy = RetryPolicy {
+            max_attempts: 1,
+            ..RetryPolicy::default()
+        };
+        let tag = op.id;
+        let key = |op: &mut Operation| {
+            let step = &mut op.steps[1];
+            step.begin_attempt(&policy).unwrap();
+            let Action::Create(request) = step.observe(&Observation::Absent, tag).unwrap() else {
+                panic!("absent must ask for a create");
+            };
+            request.idempotency_key
+        };
+        op.steps[0].state = StepState::Done {
+            resource_id: id(1),
+            adopted: false,
+        };
+        let first = key(&mut op);
+        assert_eq!(first, format!("{tag}/1"));
+        op.steps[1].failed(ErrorClass::Timeout).unwrap();
+        assert_eq!(op.steps[1].begin_attempt(&policy), Ok(Begin::Exhausted));
+        op.finish(OperationOutcome::Partial).unwrap();
+        op.retry().unwrap();
+        assert_eq!(key(&mut op), first, "a new round sends the same key");
     }
 
     #[test]

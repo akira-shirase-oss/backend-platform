@@ -1,7 +1,8 @@
 //! `fake-provider`: the fault-injecting fake provider over HTTP (a test fixture).
 //!
 //! Environment: `BP_FAKE_LISTEN` (default `127.0.0.1:61410`), `BP_FAKE_UNIQUE_NAMES`
-//! (`true` to refuse taken names), `BP_FAKE_RECORD_CALLS` (`true` to keep every call),
+//! (`true` to refuse taken names), `BP_FAKE_IDEMPOTENCY_KEYS` (`true` to de-duplicate
+//! creates by key), `BP_FAKE_RECORD_CALLS` (`true` to keep every call),
 //! `BP_FAKE_HANG_MS` (default 30000), `BP_FAKE_RANDOM_PER_MILLION` and `BP_FAKE_RANDOM_SEED`
 //! (a random fault schedule from the start).
 
@@ -49,6 +50,7 @@ async fn main() -> anyhow::Result<()> {
     let random = random.transpose()?;
     let fake = Arc::new(FakeProvider::new(FakeOptions {
         unique_names: env_bool("BP_FAKE_UNIQUE_NAMES")?,
+        honor_idempotency_keys: env_bool("BP_FAKE_IDEMPOTENCY_KEYS")?,
         record_calls: env_bool("BP_FAKE_RECORD_CALLS")?,
         faults: FaultConfig {
             rules: Vec::new(),

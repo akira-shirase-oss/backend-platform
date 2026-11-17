@@ -118,6 +118,8 @@ pub enum CallOutcome {
     Created,
     /// Create refused: name taken (unique-names mode only).
     AlreadyExists,
+    /// Create answered with the resource an earlier create with the same key made.
+    Replayed,
     /// Failed before any effect.
     Failed,
 }
@@ -174,6 +176,8 @@ struct State {
     resources: HashMap<(ResourceKind, ProviderName), Vec<FakeResource>>,
     next_id: u64,
     unique_names: bool,
+    honor_keys: bool,
+    keys: HashMap<String, ProviderResourceId>,
     rules: Vec<(FaultRule, u32)>,
     random: Option<(u64, u32, Option<u64>)>,
     calls: Option<Vec<Call>>,
@@ -268,6 +272,9 @@ pub struct FakeProvider {
 pub struct FakeOptions {
     /// Refuse a create whose name exists (like PostgreSQL's `CREATE DATABASE`).
     pub unique_names: bool,
+    /// De-duplicate creates by their idempotency key: a repeated key returns the first
+    /// resource made with it (like providers that take an idempotency key).
+    pub honor_idempotency_keys: bool,
     /// Keep every call (drills); off for long load runs.
     pub record_calls: bool,
     /// The initial faults.
@@ -281,6 +288,8 @@ impl FakeProvider {
             resources: HashMap::new(),
             next_id: 0,
             unique_names: options.unique_names,
+            honor_keys: options.honor_idempotency_keys,
+            keys: HashMap::new(),
             rules: Vec::new(),
             random: None,
             calls: options.record_calls.then(Vec::new),
@@ -404,6 +413,23 @@ impl FakeProvider {
                 hang: false,
             };
         }
+        if state.honor_keys
+            && !request.idempotency_key.is_empty()
+            && let Some(id) = state.keys.get(&request.idempotency_key).cloned()
+        {
+            state.record(
+                CallKind::Create,
+                request.kind,
+                &request.name,
+                Some(request.tag),
+                fault,
+                CallOutcome::Replayed,
+            );
+            return Reply {
+                result: Ok(id),
+                hang: false,
+            };
+        }
         if state.unique_names && state.resources.get(&key).is_some_and(|l| !l.is_empty()) {
             state.record(
                 CallKind::Create,
@@ -419,6 +445,11 @@ impl FakeProvider {
             };
         }
         let id = next_id(&mut state, request.kind);
+        if state.honor_keys && !request.idempotency_key.is_empty() {
+            state
+                .keys
+                .insert(request.idempotency_key.clone(), id.clone());
+        }
         state.resources.entry(key).or_default().push(FakeResource {
             id: id.clone(),
             kind: request.kind,
@@ -549,6 +580,7 @@ mod tests {
             name: provider_name(&p, ResourceKind::Bucket, &n),
             spec: ResourceSpec::Bucket { quota_bytes: 1 },
             tag: OperationId(Uuid::nil()),
+            idempotency_key: "op/0".to_owned(),
         }
     }
 
@@ -561,6 +593,27 @@ mod tests {
         let inventory = fake.inventory();
         assert_eq!((inventory.resources, inventory.names), (2, 1));
         assert_eq!(inventory.duplicates[0].count, 2);
+    }
+
+    #[test]
+    fn idempotency_keys_replay_the_first_resource() {
+        let fake = FakeProvider::new(FakeOptions {
+            honor_idempotency_keys: true,
+            ..FakeOptions::default()
+        });
+        let r = request();
+        let first = fake.create_now(&r).result.unwrap();
+        assert_eq!(fake.create_now(&r).result, Ok(first));
+        assert_eq!(fake.inventory().resources, 1);
+        let other = CreateRequest {
+            idempotency_key: String::new(),
+            ..r
+        };
+        assert!(
+            fake.create_now(&other).result.is_ok(),
+            "no key, no de-duplication"
+        );
+        assert_eq!(fake.inventory().resources, 2);
     }
 
     #[test]

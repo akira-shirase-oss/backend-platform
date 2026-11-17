@@ -276,6 +276,7 @@ async fn the_drill_catches_a_blind_retry() {
                 name: resource.name.clone(),
                 spec: resource.spec.clone(),
                 tag: OperationId(Uuid::nil()),
+                idempotency_key: String::new(),
             };
             // Blind: "it failed, so it didn't happen" — the bug the contract forbids.
             while provider.create(&request).await.is_err() {}
