@@ -142,6 +142,30 @@ pub enum RunError {
     /// A bug: the state machine refused a transition.
     #[error("the state machine refused a transition")]
     Transition(#[from] TransitionError),
+    /// The local lease deadline passed before a provider call (the worker was paused or
+    /// starved): it stops instead of calling, because another worker may own the
+    /// operation now (F4).
+    #[error("the lease ran out before a provider call; another worker may own the operation")]
+    LeaseExpired,
+}
+
+/// The lease as this worker knows it, on its own monotonic clock: measured from just
+/// before the last save that renewed it, so it can only be earlier than the database's.
+#[derive(Debug, Clone, Copy)]
+struct LocalLease {
+    valid_until: tokio::time::Instant,
+}
+
+impl LocalLease {
+    /// Refuses a provider call that could not finish (its own deadline included) before
+    /// the lease runs out.
+    fn check(&self, call_timeout: Duration) -> Result<(), RunError> {
+        if tokio::time::Instant::now() + call_timeout > self.valid_until {
+            Err(RunError::LeaseExpired)
+        } else {
+            Ok(())
+        }
+    }
 }
 
 async fn call<T>(
@@ -163,10 +187,12 @@ async fn attempt<P: Provider, H: Hooks>(
     provider: &P,
     hooks: &H,
     config: &ReconcileConfig,
+    lease: LocalLease,
 ) -> Result<(), RunError> {
     let (position, attempt) = (step.position, step.attempts);
     let kind = step.resource.kind;
     let name = step.resource.name.clone();
+    lease.check(config.call_timeout)?;
     let observed = call(config.call_timeout, provider.lookup(kind, &name)).await;
     hooks.at(Point::AfterLookup, position, attempt).await?;
     let observation = match observed {
@@ -176,12 +202,14 @@ async fn attempt<P: Provider, H: Hooks>(
     let Action::Create(request) = step.observe(&observation, operation)? else {
         return Ok(());
     };
+    lease.check(config.call_timeout)?;
     let created = call(config.call_timeout, provider.create(&request)).await;
     hooks.at(Point::AfterCreate, position, attempt).await?;
     match created {
         Ok(id) => step.created(id)?,
         Err(ErrorClass::AlreadyExists) => {
             // Someone holds the name (a lost earlier reply): observe again and adopt.
+            lease.check(config.call_timeout)?;
             match call(config.call_timeout, provider.lookup(kind, &name)).await {
                 Ok(again @ Observation::Present(_)) => {
                     let _settled = step.observe(&again, operation)?;
@@ -211,6 +239,10 @@ pub async fn run_claimed<L: OperationLog, P: Provider, H: Hooks>(
     } = claimed;
     // A step whose new state is not yet committed; it goes out with the next write.
     let mut unsaved: Option<usize> = None;
+    // No provider call happens before the first save renews the lease.
+    let mut local = LocalLease {
+        valid_until: tokio::time::Instant::now(),
+    };
     loop {
         match operation.next() {
             Next::Finish(outcome) => {
@@ -240,13 +272,15 @@ pub async fn run_claimed<L: OperationLog, P: Provider, H: Hooks>(
                     batch.push(&operation.steps[previous]);
                 }
                 batch.push(&operation.steps[i]);
+                let sent = tokio::time::Instant::now();
                 log.save(&lease, &batch, config.lease).await?;
+                local.valid_until = sent + config.lease;
                 let Begin::Attempt(number) = begin else {
                     continue; // gave up; saved; the next turn finishes the round as partial
                 };
                 let step = &mut operation.steps[i];
                 hooks.at(Point::AfterBegin, step.position, number).await?;
-                attempt(step, operation.id, provider, hooks, config).await?;
+                attempt(step, operation.id, provider, hooks, config, local).await?;
                 unsaved = Some(i);
             }
         }

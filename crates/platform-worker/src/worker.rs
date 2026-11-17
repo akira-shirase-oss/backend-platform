@@ -82,7 +82,7 @@ async fn task_loop<L: OperationLog, P: Provider, H: Hooks>(
                         tracing::warn!(%operation, "halted at a fault point");
                         return;
                     }
-                    Err(RunError::Log(LogError::Fenced)) => {
+                    Err(RunError::Log(LogError::Fenced) | RunError::LeaseExpired) => {
                         tracing::warn!(%operation, "lease lost; another worker owns the operation");
                     }
                     Err(error) => {

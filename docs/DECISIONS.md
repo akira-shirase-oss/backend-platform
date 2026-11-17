@@ -224,11 +224,20 @@ starting values; changing one needs a measurement and a new entry.
   at a time, oldest first. Reason: intent before effect, at one round trip
   per step; a crash after a create costs one lookup and an adoption, never
   a duplicate. Cost: a crash can lose one recorded result, which the next
-  attempt re-observes. Residual risk: a worker paused past its lease while a
-  create is in flight could race its successor. Real providers' name
-  uniqueness (`CREATE DATABASE`, bucket names, realm names) is the
-  backstop, and it is why D-016's deterministic names matter. The drill
-  kills workers; it does not pause them.
+  attempt re-observes. **Before every provider call** the worker checks its
+  lease on its own monotonic clock. The lease is measured from just before
+  the save that renewed it, so the local view is never later than the
+  database's. A call that could not finish, its own deadline included,
+  inside the lease is not sent: the worker stops with `LeaseExpired`. So a
+  worker paused past its lease does not call the provider when it wakes
+  (review F4; `tests/pause_drill.rs` showed a duplicate before this). **The
+  residual window** is the time between that check and the request reaching
+  the provider. Within it, a pause (SIGSTOP, VM freeze) or a provider that
+  applies a request late can still let a stale create land after a
+  successor's lookup. Name uniqueness (`CREATE DATABASE`, bucket and realm
+  names) closes the window on providers that enforce it. On providers that
+  do not, the request must carry an idempotency key.
+
 - **D-030 — The fake provider allows duplicate names.** By default, a
   create always makes a new resource with a fresh id. So the
   partial-provisioning drill measures the reconciler, not the provider: a
