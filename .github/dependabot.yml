@@ -1,0 +1,36 @@
+# Weekly, grouped version updates for this repository's crates, the starter template's
+# crates (its own lockfile) and the SHA-pinned actions. A cooldown lets a fresh release age
+# a week before it is proposed; groups take minor and patch updates only, so a semver-major
+# comes as its own pull request. Every update still passes the gate.
+version: 2
+updates:
+  - package-ecosystem: cargo
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    groups:
+      cargo:
+        patterns: ["*"]
+        update-types: [minor, patch]
+  - package-ecosystem: cargo
+    directory: /template
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    groups:
+      template-cargo:
+        patterns: ["*"]
+        update-types: [minor, patch]
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    groups:
+      actions:
+        patterns: ["*"]
+        update-types: [minor, patch]

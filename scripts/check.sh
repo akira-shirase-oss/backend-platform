@@ -3,7 +3,8 @@
 # warnings denied (fault-injection build included), the architecture rules and proof that
 # each can fail, every test against PostgreSQL (this starts the local stack when
 # BP_TEST_DATABASE_URL is unset), the partial-provisioning drill (10,000 in-process
-# schedules and the process-level kill -9 cases), a short load probe, then cargo-deny.
+# schedules and the process-level kill -9 cases), a short load probe, cargo-deny, then the
+# starter template's own gate (template/scripts/check.sh).
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -55,7 +56,10 @@ cargo test --workspace --locked
 cargo test -p platform-worker --features fault-injection --test kill_drill --locked
 
 # The control-API load scenario, as a short probe (never committed as evidence).
-if command -v k6 >/dev/null 2>&1; then
+# BP_SKIP_LOAD_PROBE=1 skips it while another load run owns the machine; CI never sets it.
+if [ "${BP_SKIP_LOAD_PROBE:-0}" = 1 ]; then
+  echo "note: BP_SKIP_LOAD_PROBE=1; load probe skipped locally (CI runs it)"
+elif command -v k6 >/dev/null 2>&1; then
   TOTAL=2000 RATE=200 PROJECTS=100 scripts/load.sh >/dev/null
   echo "load probe ok"
 else
@@ -69,4 +73,10 @@ if command -v cargo-deny >/dev/null 2>&1; then
 else
   echo "note: cargo-deny not installed; supply-chain check skipped locally (CI runs it)"
 fi
+# The starter template (B1-T): its own workspace and gate, run on this stack's PostgreSQL
+# (its roles are starter_*, so it never touches this repository's databases). CI runs it as
+# its own job on the template's own stack.
+STARTER_TEST_DATABASE_URL="$BP_TEST_DATABASE_URL" \
+  STARTER_PG_CONTAINER="$(docker compose -f deploy/compose.yaml ps -q postgres 2>/dev/null || true)" \
+  template/scripts/check.sh
 echo "check ok"

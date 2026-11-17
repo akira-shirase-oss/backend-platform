@@ -1,0 +1,39 @@
+[package]
+name = "starter-server"
+description = "The service skeleton: configuration, the health contract, wiring, and starterctl."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "starter-server"
+path = "src/main.rs"
+
+[[bin]]
+name = "starterctl"
+path = "src/bin/starterctl.rs"
+
+[dependencies]
+anyhow.workspace = true
+axum.workspace = true
+serde_json.workspace = true
+sqlx.workspace = true
+starter-accounts.workspace = true
+starter-db.workspace = true
+starter-http.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+http-body-util.workspace = true
+starter-db = { workspace = true, features = ["test-support"] }
+tokio = { workspace = true, features = ["process"] }
+tower.workspace = true
+
+[lints]
+workspace = true

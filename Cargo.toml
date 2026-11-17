@@ -1,5 +1,7 @@
 [workspace]
 members = ["crates/*", "fixtures/fake-provider"]
+# The starter template is its own workspace, copied and owned by each product (D-036).
+exclude = ["template"]
 resolver = "3"
 
 [workspace.package]
