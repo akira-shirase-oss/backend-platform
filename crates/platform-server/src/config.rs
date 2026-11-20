@@ -82,11 +82,12 @@ impl Default for Config {
     }
 }
 
-fn var(name: &str) -> Option<String> {
-    std::env::var(name).ok().filter(|v| !v.is_empty())
-}
-
-fn parse<T: std::str::FromStr>(name: &str, default: T, errors: &mut Vec<String>) -> T {
+fn parse<T: std::str::FromStr>(
+    var: &dyn Fn(&str) -> Option<String>,
+    name: &str,
+    default: T,
+    errors: &mut Vec<String>,
+) -> T {
     match var(name) {
         None => default,
         Some(value) => value.parse().unwrap_or_else(|_| {
@@ -99,6 +100,13 @@ fn parse<T: std::str::FromStr>(name: &str, default: T, errors: &mut Vec<String>)
 impl Config {
     /// Reads and validates the environment, reporting every problem at once.
     pub fn from_env() -> Result<Self, String> {
+        Self::from_lookup(|name| std::env::var(name).ok())
+    }
+
+    /// The same validation over an injected lookup, so tests and fuzz targets can feed
+    /// arbitrary values without mutating the process environment.
+    pub fn from_lookup(lookup: impl Fn(&str) -> Option<String>) -> Result<Self, String> {
+        let var = |name: &str| lookup(name).filter(|v| !v.is_empty());
         let defaults = Self::default();
         let mut errors = Vec::new();
         let database_url = var("BP_DATABASE_URL").unwrap_or_else(|| {
@@ -122,22 +130,35 @@ impl Config {
             }
         };
         let config = Self {
-            listen: parse("BP_LISTEN", defaults.listen, &mut errors),
+            listen: parse(&var, "BP_LISTEN", defaults.listen, &mut errors),
             database_url: Secret(database_url),
             admin_token: Secret(admin_token),
-            max_body_bytes: parse("BP_MAX_BODY_BYTES", defaults.max_body_bytes, &mut errors),
+            max_body_bytes: parse(
+                &var,
+                "BP_MAX_BODY_BYTES",
+                defaults.max_body_bytes,
+                &mut errors,
+            ),
             request_timeout: Duration::from_millis(parse(
+                &var,
                 "BP_REQUEST_TIMEOUT_MS",
                 2_000,
                 &mut errors,
             )),
-            max_in_flight: parse("BP_MAX_IN_FLIGHT", defaults.max_in_flight, &mut errors),
+            max_in_flight: parse(
+                &var,
+                "BP_MAX_IN_FLIGHT",
+                defaults.max_in_flight,
+                &mut errors,
+            ),
             db_max_connections: parse(
+                &var,
                 "BP_DB_MAX_CONNECTIONS",
                 defaults.db_max_connections,
                 &mut errors,
             ),
             shutdown_grace: Duration::from_millis(parse(
+                &var,
                 "BP_SHUTDOWN_GRACE_MS",
                 10_000,
                 &mut errors,

@@ -57,11 +57,12 @@ pub struct Config {
     pub log_format: LogFormat,
 }
 
-fn var(name: &str) -> Option<String> {
-    std::env::var(name).ok().filter(|v| !v.is_empty())
-}
-
-fn number<T: std::str::FromStr>(name: &str, default: T, errors: &mut Vec<String>) -> T {
+fn number<T: std::str::FromStr>(
+    var: &dyn Fn(&str) -> Option<String>,
+    name: &str,
+    default: T,
+    errors: &mut Vec<String>,
+) -> T {
     match var(name) {
         None => default,
         Some(value) => value.parse().unwrap_or_else(|_| {
@@ -74,6 +75,13 @@ fn number<T: std::str::FromStr>(name: &str, default: T, errors: &mut Vec<String>
 impl Config {
     /// Reads and validates the environment, reporting every problem at once.
     pub fn from_env() -> Result<Self, String> {
+        Self::from_lookup(|name| std::env::var(name).ok())
+    }
+
+    /// The same validation over an injected lookup, so tests and fuzz targets can feed
+    /// arbitrary values without mutating the process environment.
+    pub fn from_lookup(lookup: impl Fn(&str) -> Option<String>) -> Result<Self, String> {
+        let var = |name: &str| lookup(name).filter(|v| !v.is_empty());
         let mut errors = Vec::new();
         let database_url = var("BP_DATABASE_URL").unwrap_or_else(|| {
             errors.push("BP_DATABASE_URL is required".to_owned());
@@ -89,20 +97,25 @@ impl Config {
         {
             errors.push("BP_PROVIDER_URL must be an http(s) URL".to_owned());
         }
-        let concurrency = number("BP_WORKER_CONCURRENCY", 16_usize, &mut errors);
+        let concurrency = number(&var, "BP_WORKER_CONCURRENCY", 16_usize, &mut errors);
         if !(1..=256).contains(&concurrency) {
             errors.push("BP_WORKER_CONCURRENCY must be 1 to 256".to_owned());
         }
         let default_pool = u32::try_from(concurrency + 2).unwrap_or(32);
-        let db_max_connections = number("BP_DB_MAX_CONNECTIONS", default_pool, &mut errors);
+        let db_max_connections = number(&var, "BP_DB_MAX_CONNECTIONS", default_pool, &mut errors);
         let reconcile = ReconcileConfig {
             policy: RetryPolicy {
-                max_attempts: number("BP_MAX_ATTEMPTS", 5, &mut errors),
-                base: Duration::from_millis(number("BP_BACKOFF_BASE_MS", 50, &mut errors)),
-                cap: Duration::from_millis(number("BP_BACKOFF_CAP_MS", 2_000, &mut errors)),
+                max_attempts: number(&var, "BP_MAX_ATTEMPTS", 5, &mut errors),
+                base: Duration::from_millis(number(&var, "BP_BACKOFF_BASE_MS", 50, &mut errors)),
+                cap: Duration::from_millis(number(&var, "BP_BACKOFF_CAP_MS", 2_000, &mut errors)),
             },
-            call_timeout: Duration::from_millis(number("BP_CALL_TIMEOUT_MS", 2_000, &mut errors)),
-            lease: Duration::from_millis(number("BP_LEASE_MS", 20_000, &mut errors)),
+            call_timeout: Duration::from_millis(number(
+                &var,
+                "BP_CALL_TIMEOUT_MS",
+                2_000,
+                &mut errors,
+            )),
+            lease: Duration::from_millis(number(&var, "BP_LEASE_MS", 20_000, &mut errors)),
         };
         if let Err(problem) = reconcile.validate() {
             errors.push(problem);
@@ -120,14 +133,16 @@ impl Config {
             provider_url,
             concurrency,
             db_max_connections,
-            poll_idle_max: Duration::from_millis(number("BP_POLL_MAX_MS", 200, &mut errors)),
+            poll_idle_max: Duration::from_millis(number(&var, "BP_POLL_MAX_MS", 200, &mut errors)),
             db_call_timeout: Duration::from_millis(number(
+                &var,
                 "BP_DB_CALL_TIMEOUT_MS",
                 5_000,
                 &mut errors,
             )),
             reconcile,
             shutdown_grace: Duration::from_millis(number(
+                &var,
                 "BP_SHUTDOWN_GRACE_MS",
                 10_000,
                 &mut errors,

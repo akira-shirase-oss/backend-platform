@@ -42,7 +42,7 @@ fn operation_id(raw: &str) -> Result<OperationId, ApiError> {
         .map_err(|_| ApiError::Invalid("operation id must be a UUID".to_owned()))
 }
 
-fn idempotency_key(headers: &HeaderMap) -> Result<Option<String>, ApiError> {
+pub fn idempotency_key(headers: &HeaderMap) -> Result<Option<String>, ApiError> {
     let Some(value) = headers.get("idempotency-key") else {
         return Ok(None);
     };

@@ -16,17 +16,24 @@ pub fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
     a.iter().zip(b).fold(0_u8, |acc, (x, y)| acc | (x ^ y)) == 0
 }
 
+/// The bearer token a request's `Authorization` header presents, when exactly one
+/// `Bearer <token>` header is present. Any other shape presents nothing.
+pub fn bearer_token(headers: &axum::http::HeaderMap) -> Option<&str> {
+    let mut values = headers.get_all(header::AUTHORIZATION).iter();
+    let value = values.next()?;
+    if values.next().is_some() {
+        return None;
+    }
+    value.to_str().ok()?.strip_prefix("Bearer ")
+}
+
 /// Refuses any request without `Authorization: Bearer <admin token>`.
 pub async fn require_admin(
     State(state): State<AppState>,
     request: Request,
     next: Next,
 ) -> Response {
-    let presented = request
-        .headers()
-        .get(header::AUTHORIZATION)
-        .and_then(|v| v.to_str().ok())
-        .and_then(|v| v.strip_prefix("Bearer "));
+    let presented = bearer_token(request.headers());
     match presented {
         Some(token)
             if constant_time_eq(token.as_bytes(), state.admin_token.expose().as_bytes()) =>
