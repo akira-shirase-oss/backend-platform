@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/*", "fixtures/fake-provider"]
+members = ["crates/*", "fixtures/fake-provider", "tests/attacks"]
 # The starter template is its own workspace, copied and owned by each product (D-036).
 exclude = ["template"]
 resolver = "3"
@@ -17,6 +17,7 @@ platform-domain = { path = "crates/platform-domain" }
 platform-db = { path = "crates/platform-db" }
 platform-adapters = { path = "crates/platform-adapters" }
 platform-worker = { path = "crates/platform-worker" }
+platform-server = { path = "crates/platform-server" }
 platform-fake-provider = { path = "fixtures/fake-provider" }
 
 # External crates: versions live here only. Minimal features; one async runtime (Tokio);

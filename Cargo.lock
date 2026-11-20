@@ -1019,6 +1019,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "platform-attacks"
+version = "0.1.0"
+dependencies = [
+ "axum",
+ "platform-adapters",
+ "platform-db",
+ "platform-domain",
+ "platform-server",
+ "platform-worker",
+ "proptest",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "tokio",
+ "uuid",
+]
+
+[[package]]
 name = "platform-db"
 version = "0.1.0"
 dependencies = [
