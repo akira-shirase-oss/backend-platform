@@ -4,8 +4,8 @@
 #
 #   scripts/check.sh
 #
-# Toolchain pin, formatting, Clippy with warnings denied, the architecture, pin and results
-# checks (each shown able to fail), the host layer's checks, every test against PostgreSQL
+# Toolchain pin, formatting, Clippy with warnings denied, the architecture, pin, port-band,
+# workflow-YAML and results checks (each shown able to fail), the host layer's checks, every test against PostgreSQL
 # (the local stack starts when STARTER_TEST_DATABASE_URL is unset), the restore drills with
 # their controls and the upgrade rehearsal, then cargo-deny. The limit proofs
 # (scripts/prove-limits.sh) run as their own CI job.
@@ -55,6 +55,43 @@ for unpinned in 'services:\n  db:\n    image: postgres:18\n' 'steps:\n  - uses: 
     exit 1
   fi
 done
+rm -f "$sample"
+
+# The copy's port band: every port it binds stays inside it (docs/COPYING.md). The
+# out-of-band probes reach the sample file through printf %s, so this script itself
+# holds no offending literal for the check to flag.
+port_band="${PORT_BAND:=61400-61499}"
+step "ports inside the band $port_band, and the check can fail"
+PORT_BAND="$port_band" scripts/check-ports.sh
+band_low="${port_band%%-*}" band_high="${port_band##*-}"
+sample="$(mktemp)"
+for bad in '  - "61300:5432"' 'port=8080'; do
+  printf '%s\n' "$bad" >"$sample"
+  if PORT_BAND="$port_band" scripts/check-ports.sh "$sample" >/dev/null 2>&1; then
+    echo "error: the port check did not catch: $bad" >&2
+    rm -f "$sample"
+    exit 1
+  fi
+done
+for n in $((band_low - 1)) $((band_high + 1)); do
+  printf 'echo http://127.0.0.1:%s/livez\n' "$n" >"$sample"
+  if PORT_BAND="$port_band" scripts/check-ports.sh "$sample" >/dev/null 2>&1; then
+    echo "error: the port check did not catch a loopback port $n outside the band" >&2
+    rm -f "$sample"
+    exit 1
+  fi
+done
+rm -f "$sample"
+
+step "workflow files parse with no duplicate keys, and the check can fail"
+scripts/check-workflows.sh
+sample="$(mktemp)"
+printf 'jobs:\n  build:\n    steps: []\n  build:\n    steps: []\n' >"$sample"
+if scripts/check-workflows.sh "$sample" >/dev/null 2>&1; then
+  echo "error: the workflow check passed a duplicate key" >&2
+  rm -f "$sample"
+  exit 1
+fi
 rm -f "$sample"
 
 step "results name no host, and the check can fail"
