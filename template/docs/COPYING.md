@@ -94,7 +94,9 @@ A copy never updates itself. To take a later template change:
    history (`docs/DECISIONS.md` there) say why each change was made.
 4. Apply the taken changes as one commit in the copy, renamed as the copy is named
    (`scripts/copy-template.sh` into a scratch directory gives the renamed text to diff
-   against).
+   against), then run `cargo fmt --all` in the copy: a rename can reorder imports or
+   re-wrap a line (`use tokio` sorts after `starter_*` but before `ya_*`), and the gate's
+   `fmt --check` fails on the raw diff even though the renamed code is correct.
 5. Run the copy's gate and every affected drill; record misses.
 6. Update `template-commit` in `TEMPLATE_ORIGIN`.
 
