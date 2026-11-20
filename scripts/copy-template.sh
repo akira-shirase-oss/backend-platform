@@ -26,7 +26,7 @@ if [ -e "$dest" ] && [ -n "$(ls -A "$dest" 2>/dev/null)" ]; then
   echo "error: $dest exists and is not empty" >&2
   exit 2
 fi
-mkdir -p "$dest"
+[ -e "$dest" ] || mkdir -p "$dest"
 (cd template && tar --exclude ./target -cf - .) | tar -xf - -C "$dest"
 
 python3 -I - "$dest" "$name" <<'PY'
@@ -100,6 +100,15 @@ name: $name
 EOF
 echo "copied template/ at $commit to $dest as $name"
 
+# The rename changes crate-name lengths, which rustfmt and Clippy see: format the copy so
+# it passes `cargo fmt --check` out of the box. Whatever cargo is first on PATH is used —
+# under rustup it resolves the copy's rust-toolchain.toml pin.
+if ! command -v cargo >/dev/null 2>&1; then
+  echo "note: no cargo on PATH; run 'cargo fmt --all' in the copy before scripts/check.sh" >&2
+elif ! (cd "$dest" && cargo fmt --all); then
+  echo "note: 'cargo fmt --all' failed in the copy; run it there before scripts/check.sh" >&2
+fi
+
 if [ "$verify" = --verify ]; then
   : "${STARTER_TEST_DATABASE_URL:?set it to an administrator URL to verify the copy}"
   upper="$(tr '[:lower:]' '[:upper:]' <<<"$name")"
@@ -107,6 +116,7 @@ if [ "$verify" = --verify ]; then
     cd "$dest"
     export CARGO_TARGET_DIR="$PWD/target"
     export "${upper}_TEST_DATABASE_URL=$STARTER_TEST_DATABASE_URL"
+    cargo fmt --all -- --check
     cargo clippy --workspace --all-targets --locked -q -- -D warnings
     cargo test --workspace --locked -q 2>&1 | grep -E 'test result|FAILED|panicked' || true
     cargo test --workspace --locked -q >/dev/null 2>&1
