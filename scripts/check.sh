@@ -82,6 +82,8 @@ export BP_TEST_DATABASE_URL
 cargo test --workspace --locked
 # Drill partial-provision, process level: the real worker binary killed with SIGKILL.
 cargo test -p platform-worker --features fault-injection --test kill_drill --locked
+# Every parser of outside input: seed corpus replay + a bounded proptest smoke.
+scripts/fuzz-smoke.sh --cases "${PROPTEST_CASES:-512}"
 
 # The control-API load scenario, as a short probe (never committed as evidence), run on
 # non-default band ports so it also proves BP_SERVER_PORT/BP_FAKE_PORT parameterise a run.

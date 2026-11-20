@@ -82,6 +82,8 @@ jobs:
         run: cargo test --workspace --locked
       - name: Drill partial-provision, process level (the real worker killed with SIGKILL)
         run: cargo test -p platform-worker --features fault-injection --test kill_drill --locked
+      - name: Fuzz smoke (seed corpus replay + 512 generated cases per parser of outside input)
+        run: scripts/fuzz-smoke.sh --cases 512
       - name: Load probe (a short control-API run on non-default band ports; the evidence runs are the load workflow's)
         env:
           BP_LOAD_ADMIN_URL: postgres://platform:platform-dev@127.0.0.1:61432/platform
