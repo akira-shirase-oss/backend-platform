@@ -1,0 +1,153 @@
+# The load evidence runs on hosted runners, not the laptop: B0's quiet-machine
+# smoke (100,000 control-API requests), B0's 1,000,000-request run, and the
+# starter template's 1,000,000-request service run (D-018). Manual only. Each
+# job is one scenario on its own quiet runner; the script records the runner's
+# CPU, cores, memory, OS, commit and the load average. Results land in
+# perf/results/, upload as artifacts — a miss uploads too, kept never rerun to
+# green — and are committed through a reviewed branch; this workflow never
+# pushes.
+name: load-full
+
+on:
+  workflow_dispatch:
+    inputs:
+      scenario:
+        description: "all, or one job"
+        required: true
+        default: "all"
+        type: choice
+        options: [all, b0-smoke, b0-full, template-service]
+
+permissions:
+  contents: read
+
+concurrency:
+  # Never cancel a run halfway: a partial run is not evidence, and two runs on
+  # one runner would contaminate each other's numbers.
+  group: load-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  b0-smoke:
+    if: inputs.scenario == 'all' || inputs.scenario == 'b0-smoke'
+    name: control-api, smoke (100,000 requests)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    services:
+      postgres:
+        # Same image and digest as deploy/compose.yaml and the ci job.
+        image: postgres:18.7-trixie@sha256:2ea8630df176ad090ec92136dee850397c5af8781e4bcf2e4162593691c61bbc
+        env:
+          POSTGRES_USER: platform
+          POSTGRES_PASSWORD: platform-dev
+          POSTGRES_DB: platform
+        ports:
+          - 61432:5432
+        options: >-
+          --health-cmd "pg_isready --host=127.0.0.1 --username=platform --dbname=platform"
+          --health-interval 2s
+          --health-timeout 3s
+          --health-retries 30
+    env:
+      BP_LOAD_ADMIN_URL: postgres://platform:platform-dev@127.0.0.1:61432/platform
+      MODE: smoke
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install the pinned toolchain
+        run: |
+          channel=$(sed -n 's/^channel = "\(.*\)"$/\1/p' rust-toolchain.toml)
+          rustup toolchain install "$channel" --profile minimal
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      - name: k6 (pinned, checksum-verified)
+        run: scripts/install-k6.sh "$RUNNER_TEMP/bin"
+      - name: The smoke run
+        run: PATH="$RUNNER_TEMP/bin:$PATH" scripts/load.sh
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: perf-results-b0-smoke-${{ github.run_id }}
+          path: perf/results/*.json
+          if-no-files-found: warn
+          retention-days: 30
+
+  b0-full:
+    if: inputs.scenario == 'all' || inputs.scenario == 'b0-full'
+    name: control-api, full (1,000,000 requests)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    services:
+      postgres:
+        # Same image and digest as deploy/compose.yaml and the ci job.
+        image: postgres:18.7-trixie@sha256:2ea8630df176ad090ec92136dee850397c5af8781e4bcf2e4162593691c61bbc
+        env:
+          POSTGRES_USER: platform
+          POSTGRES_PASSWORD: platform-dev
+          POSTGRES_DB: platform
+        ports:
+          - 61432:5432
+        options: >-
+          --health-cmd "pg_isready --host=127.0.0.1 --username=platform --dbname=platform"
+          --health-interval 2s
+          --health-timeout 3s
+          --health-retries 30
+    env:
+      BP_LOAD_ADMIN_URL: postgres://platform:platform-dev@127.0.0.1:61432/platform
+      MODE: full
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install the pinned toolchain
+        run: |
+          channel=$(sed -n 's/^channel = "\(.*\)"$/\1/p' rust-toolchain.toml)
+          rustup toolchain install "$channel" --profile minimal
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      - name: k6 (pinned, checksum-verified)
+        run: scripts/install-k6.sh "$RUNNER_TEMP/bin"
+      - name: The 1,000,000-request run
+        run: PATH="$RUNNER_TEMP/bin:$PATH" scripts/load.sh
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: perf-results-b0-full-${{ github.run_id }}
+          path: perf/results/*.json
+          if-no-files-found: warn
+          retention-days: 30
+
+  template-service:
+    if: inputs.scenario == 'all' || inputs.scenario == 'template-service'
+    name: starter template, service scenario (1,000,000 requests)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    env:
+      MODE: full
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install the pinned toolchain (the template's own pin)
+        run: |
+          channel=$(sed -n 's/^channel = "\(.*\)"$/\1/p' template/rust-toolchain.toml)
+          rustup toolchain install "$channel" --profile minimal
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          workspaces: template
+      - name: k6 (the template's pinned, checksum-verified installer)
+        run: template/scripts/install-k6.sh "$RUNNER_TEMP/bin"
+      - name: The template's database stack (STARTER_PG_CONTAINER, so the drills' pg calls work)
+        working-directory: template
+        run: scripts/stack.sh up
+      - name: The 1,000,000-request run
+        working-directory: template
+        run: |
+          eval "$(scripts/stack.sh env)"
+          PATH="$RUNNER_TEMP/bin:$PATH" scripts/load.sh
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: perf-results-template-${{ github.run_id }}
+          path: template/perf/results/*.json
+          if-no-files-found: warn
+          retention-days: 30
