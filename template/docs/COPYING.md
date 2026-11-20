@@ -60,6 +60,7 @@ Durable Runner.
 | Releases and the rehearsal | `scripts/{deploy,rollback,upgrade-rehearsal}.sh` | the migration and schema steps become the product's own compatibility check (a journal format version, say) |
 | Restore drills | `scripts/drills/` | one per store the product has |
 | CI and evidence kit | `scripts/check-*.sh`, `scripts/install-*.sh`, `.github/` | add the steps to the product's own gate |
+| Attack and fuzz kit | `tests/attacks`, `scripts/fuzz-smoke.sh` | attack the product's real routes as they grow; a fuzz crash is a red-first bug — fix it and keep the shrunk input in `tests/attacks/fuzz/corpus/` |
 
 ## What must stay in step
 
