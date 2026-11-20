@@ -14,8 +14,9 @@
 # be lost by that restore; the rehearsal writes none, and says so.
 #
 # Needs STARTER_TEST_DATABASE_URL (an administrator), the PostgreSQL tools
-# (STARTER_PG_CONTAINER or PATH), curl, jq, python3. Ports 61451 (server), 61459 (a fake
-# SMTP sink). Builds vN+1 into target/rehearsal; the scratch source and prefix are deleted.
+# (STARTER_PG_CONTAINER or PATH), curl, jq, python3. Ports: STARTER_REHEARSAL_PORT (default
+# 61451) for the server, that + 8 for the fake SMTP sink. Builds vN+1 into
+# target/rehearsal; the scratch source and prefix are deleted.
 set -euo pipefail
 case "${1:-}" in -h|--help) sed -n '2,/^set -euo/p' "$0" | sed '$d' | sed 's/^# \{0,1\}//'; exit 0 ;; esac
 cd "$(dirname "$0")/.."
@@ -28,8 +29,8 @@ case "${1:-}" in
   *) echo "upgrade-rehearsal.sh: unknown argument $1 (see --help)" >&2; exit 2 ;;
 esac
 require_database tools
-port=61451
-sink_port=61459
+port="${STARTER_REHEARSAL_PORT:-61451}"
+sink_port=$((port + 8))
 base="http://127.0.0.1:$port"
 db="starter_rehearsal_$(date -u +%Y%m%d%H%M%S)_$$"
 drill_begin upgrade-rehearsal "$out"

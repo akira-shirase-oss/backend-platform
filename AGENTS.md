@@ -98,7 +98,8 @@ is added.
 - the architecture checks: `platform-domain` has no I/O; `platform-server`
   links no adapter, worker or fake provider and reads no `BP_PROVIDER*`
   setting; once the console exists, it imports no database client;
-- the pin check (`scripts/check-pins.sh`, T8);
+- the pin check (`scripts/check-pins.sh`, T8) and the port check
+  (`scripts/check-ports.sh`);
 - tests against PostgreSQL;
 - drill `partial-provision` (in process, plus the `kill_drill` test on the
   `fault-injection` build);
@@ -110,7 +111,9 @@ code and never pipe it through `grep`.
 
 Local stack: `scripts/stack.sh up` (compose project `backend-platform`,
 PostgreSQL on 127.0.0.1:61432; the platform's own processes use
-61400–61499: server 61400, fake provider 61410). Load runs:
+61400–61499: server 61400, fake provider 61410 — BP_PG_PORT,
+BP_SERVER_PORT and BP_FAKE_PORT move them inside the band, which
+`scripts/check-ports.sh` enforces). Load runs:
 `MODE=smoke|full scripts/load.sh`. A full run is taken only when `uptime`
 shows a load average below about 6; every result records the machine, the
 commit and the load.

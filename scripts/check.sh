@@ -46,6 +46,23 @@ done
 rm -f "$unpinned"
 echo "pin check proven able to fail"
 
+scripts/check-ports.sh
+# The port check must be able to fail too: a mapped host port and a loopback literal,
+# each alone outside the band (as CI proves for pins).
+# The out-of-band values reach the sample file through printf %s, so this script itself
+# holds no offending literal for the check to flag.
+outofband="$(mktemp)"
+for spec in 'ports:\n      - "%s:8000"\n*58000' 'curl http://127.0.0.1:%s/health\n*8080'; do
+  printf '%b' "${spec%*}" "${spec#*}" >"$outofband"
+  if scripts/check-ports.sh "$outofband" >/dev/null 2>&1; then
+    echo "error: the port check did not catch: $spec" >&2
+    rm -f "$outofband"
+    exit 1
+  fi
+done
+rm -f "$outofband"
+echo "port check proven able to fail"
+
 if [ -z "${BP_TEST_DATABASE_URL:-}" ]; then
   scripts/stack.sh up >/dev/null
   eval "$(scripts/stack.sh env)"
@@ -55,12 +72,13 @@ cargo test --workspace --locked
 # Drill partial-provision, process level: the real worker binary killed with SIGKILL.
 cargo test -p platform-worker --features fault-injection --test kill_drill --locked
 
-# The control-API load scenario, as a short probe (never committed as evidence).
+# The control-API load scenario, as a short probe (never committed as evidence), run on
+# non-default band ports so it also proves BP_SERVER_PORT/BP_FAKE_PORT parameterise a run.
 # BP_SKIP_LOAD_PROBE=1 skips it while another load run owns the machine; CI never sets it.
 if [ "${BP_SKIP_LOAD_PROBE:-0}" = 1 ]; then
   echo "note: BP_SKIP_LOAD_PROBE=1; load probe skipped locally (CI runs it)"
 elif command -v k6 >/dev/null 2>&1; then
-  TOTAL=2000 RATE=200 PROJECTS=100 scripts/load.sh >/dev/null
+  TOTAL=2000 RATE=200 PROJECTS=100 BP_SERVER_PORT=61470 BP_FAKE_PORT=61471 scripts/load.sh >/dev/null
   echo "load probe ok"
 else
   echo "note: k6 not installed (scripts/install-k6.sh); load probe skipped locally (CI runs it)"

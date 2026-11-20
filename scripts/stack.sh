@@ -15,6 +15,13 @@ cd "$(dirname "$0")/.."
 
 compose=(docker compose -f deploy/compose.yaml)
 port="${BP_PG_PORT:-61432}"
+# The stack binds a port inside this repository's band (deploy/compose.yaml), like every
+# process here, so a second checkout or another project on the shared machine cannot collide.
+case "$port" in ''|*[!0-9]*) echo "error: BP_PG_PORT is not a port number: $port" >&2; exit 2 ;; esac
+if [ "$port" -lt 61400 ] || [ "$port" -gt 61499 ]; then
+  echo "error: BP_PG_PORT $port is outside this project's port band 61400-61499" >&2
+  exit 2
+fi
 admin="postgres://platform:platform-dev@127.0.0.1:${port}/platform"
 owner="postgres://platform_owner:platform-owner-dev@127.0.0.1:${port}/bp_dev"
 runtime="postgres://platform_app:platform-app-dev@127.0.0.1:${port}/bp_dev"

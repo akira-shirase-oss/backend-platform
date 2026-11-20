@@ -8,7 +8,8 @@
 #   scripts/load.sh --setup-only      build, set up, seed and check, offer no load
 #
 # It makes a fresh database (bootstrap, migrate), starts a fake SMTP sink and the server on
-# 127.0.0.1 (61452, sink 61458), seeds one account, workspace and API token through the API,
+# 127.0.0.1 (STARTER_LOAD_PORT, default 61452, and that + 6 for the sink), seeds one
+# account, workspace and API token through the API,
 # offers load with k6 at RATE requests/s (default 1000), and writes the result: the machine
 # (CPU, cores, memory, OS: never the host's name), the commit and whether the tree was
 # dirty, the load average before and after (above 6 it is a busy-machine observation), the
@@ -31,8 +32,8 @@ mode="${MODE:-smoke}"
 rate="${RATE:-1000}"
 case "$mode" in smoke|full) ;; *) echo "MODE must be smoke or full" >&2; exit 2 ;; esac
 require_database tools
-port=61452
-sink_port=61458
+port="${STARTER_LOAD_PORT:-61452}"
+sink_port=$((port + 6))
 base="http://127.0.0.1:$port"
 db="starter_load_$(date -u +%Y%m%d%H%M%S)_$$"
 work="$(mktemp -d "${TMPDIR:-/tmp}/starter-load.XXXXXX")"

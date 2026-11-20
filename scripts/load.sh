@@ -5,8 +5,9 @@
 #   MODE=smoke scripts/load.sh    100,000 requests (the B0 baseline)
 #   MODE=full  scripts/load.sh    1,000,000 requests — only on a quiet machine
 #
-# It starts, on 127.0.0.1, the fake provider (61410) with a seeded 0.1% fault schedule,
-# the worker (no listener) and the server (61400), on a fresh control database in the
+# It starts, on 127.0.0.1, the fake provider (BP_FAKE_PORT, default 61410) with a seeded
+# 0.1% fault schedule, the worker (no listener) and the server (BP_SERVER_PORT, default
+# 61400), on a fresh control database in the
 # local stack; offers load with k6 at RATE requests/s (default 2000); then waits for the
 # worker to drain every operation and reads the provider side: duplicates must be zero and
 # the provider must hold exactly PROJECTS × 5 resources. Every result records the machine,
@@ -24,9 +25,22 @@ cd "$(dirname "$0")/.."
 mode="${MODE:-smoke}"
 rate="${RATE:-2000}"
 projects="${PROJECTS:-2000}"
-server_port=61400
-fake_port=61410
+server_port="${BP_SERVER_PORT:-61400}"
+fake_port="${BP_FAKE_PORT:-61410}"
 case "$mode" in smoke|full) ;; *) echo "MODE must be smoke or full" >&2; exit 2 ;; esac
+# A run binds ports only inside this repository's band (deploy/compose.yaml), so a second
+# checkout or another project on the shared machine never collides with it.
+for port in "$server_port" "$fake_port"; do
+  case "$port" in ''|*[!0-9]*) echo "error: not a port number: $port" >&2; exit 2 ;; esac
+  if [ "$port" -lt 61400 ] || [ "$port" -gt 61499 ]; then
+    echo "error: $port is outside this project's port band 61400-61499 (BP_SERVER_PORT, BP_FAKE_PORT)" >&2
+    exit 2
+  fi
+done
+if [ "$server_port" = "$fake_port" ]; then
+  echo "error: BP_SERVER_PORT and BP_FAKE_PORT must differ" >&2
+  exit 2
+fi
 
 cargo build --release --locked -p platform-server -p platform-worker -p platform-fake-provider -p platform-db >/dev/null
 stamp="$(date -u +%Y%m%dT%H%M%SZ)"
@@ -36,7 +50,7 @@ stamp="$(date -u +%Y%m%dT%H%M%SZ)"
 if [ -z "${BP_LOAD_ADMIN_URL:-}" ]; then
   scripts/stack.sh up >/dev/null
 fi
-admin_url="${BP_LOAD_ADMIN_URL:-postgres://platform:platform-dev@127.0.0.1:61432/platform}"
+admin_url="${BP_LOAD_ADMIN_URL:-postgres://platform:platform-dev@127.0.0.1:${BP_PG_PORT:-61432}/platform}"
 db="bp_load_$(date -u +%Y%m%d%H%M%S)"
 # Roles are cluster-wide: use the stack's public development passwords, never per-run ones.
 owner_pw=platform-owner-dev
