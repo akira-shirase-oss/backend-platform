@@ -125,6 +125,9 @@ fi
 export STARTER_TEST_DATABASE_URL
 cargo test --workspace --locked
 
+step "fuzz smoke: every parser of outside input (seed corpus + bounded cases)"
+scripts/fuzz-smoke.sh --cases "${PROPTEST_CASES:-512}"
+
 step "drills: PostgreSQL and SQLite restore, their controls, the upgrade rehearsal"
 # A pinned age installed into this copy's target (scripts/install-age.sh target/tools/bin).
 [ -d target/tools/bin ] && PATH="$PWD/target/tools/bin:$PATH"
