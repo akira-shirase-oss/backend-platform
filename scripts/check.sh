@@ -52,8 +52,8 @@ scripts/check-ports.sh
 # The out-of-band values reach the sample file through printf %s, so this script itself
 # holds no offending literal for the check to flag.
 outofband="$(mktemp)"
-for spec in 'ports:\n      - "%s:8000"\n*58000' 'curl http://127.0.0.1:%s/health\n*8080'; do
-  printf '%b' "${spec%*}" "${spec#*}" >"$outofband"
+for spec in 'ports:\n      - "%s:8000"\n|58000' 'curl http://127.0.0.1:%s/health\n|8080'; do
+  printf "${spec%|*}" "${spec#*|}" >"$outofband"
   if scripts/check-ports.sh "$outofband" >/dev/null 2>&1; then
     echo "error: the port check did not catch: $spec" >&2
     rm -f "$outofband"
@@ -62,6 +62,17 @@ for spec in 'ports:\n      - "%s:8000"\n*58000' 'curl http://127.0.0.1:%s/health
 done
 rm -f "$outofband"
 echo "port check proven able to fail"
+
+scripts/check-workflows.sh
+dup="$(mktemp)"
+printf 'jobs:\n  build:\n    steps: []\n  build:\n    steps: []\n' >"$dup"
+if scripts/check-workflows.sh "$dup" >/dev/null 2>&1; then
+  echo "error: the workflow check passed a duplicate key" >&2
+  rm -f "$dup"
+  exit 1
+fi
+rm -f "$dup"
+echo "workflow check proven able to fail"
 
 if [ -z "${BP_TEST_DATABASE_URL:-}" ]; then
   scripts/stack.sh up >/dev/null
@@ -102,4 +113,7 @@ shopt -u nullglob
 STARTER_TEST_DATABASE_URL="$BP_TEST_DATABASE_URL" \
   STARTER_PG_CONTAINER="$(docker compose -f deploy/compose.yaml ps -q postgres 2>/dev/null || true)" \
   template/scripts/check.sh
+# A template copy must be fmt- and clippy-clean at every legal NAME length — the rename
+# changes line widths, so a template edit stable only at "starter" length fails here.
+scripts/test-copy-names.sh
 echo "check ok"
