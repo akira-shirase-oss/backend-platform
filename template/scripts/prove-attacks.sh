@@ -34,7 +34,10 @@ if [ -n "$(git status --porcelain -- .)" ]; then
   exit 1
 fi
 
-work="$(mktemp -d "${TMPDIR:-/tmp}/starter-prove-attacks.XXXXXX")"
+# The scratch copy lives under target/ (tar-excluded, gitignored): tmp
+# reapers have deleted a copy mid-run before.
+mkdir -p target
+work="$(mktemp -d "$here/target/prove-attacks-work.XXXXXX")"
 trap 'rm -rf "$work"' EXIT
 tar --exclude ./target --exclude ./.git -cf - . | tar -xf - -C "$work"
 export CARGO_TARGET_DIR="$here/target/prove-attacks"
