@@ -65,7 +65,7 @@ step "ports inside the band $port_band, and the check can fail"
 PORT_BAND="$port_band" scripts/check-ports.sh
 band_low="${port_band%%-*}" band_high="${port_band##*-}"
 sample="$(mktemp)"
-for bad in '  - "61300:5432"' 'port=8080'; do
+for bad in "  - \"$((band_low - 1)):5432\"" 'port=8080'; do
   printf '%s\n' "$bad" >"$sample"
   if PORT_BAND="$port_band" scripts/check-ports.sh "$sample" >/dev/null 2>&1; then
     echo "error: the port check did not catch: $bad" >&2

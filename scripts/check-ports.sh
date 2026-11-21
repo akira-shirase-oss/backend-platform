@@ -29,8 +29,10 @@ report() {
   fail=1
 }
 
+scanned=0
 for file in "${files[@]}"; do
   [ -f "$file" ] || continue
+  scanned=$((scanned + 1))
 
   # 127.0.0.1:NNNN / localhost:NNNN literals (two digits or more; :0 is ephemeral).
   while IFS= read -r hit; do
@@ -63,4 +65,9 @@ for file in "${files[@]}"; do
 done
 
 if (( fail )); then exit 1; fi
-echo "ports ok: every literal port is inside the band 61400-61499 in ${#files[@]} files"
+# A check that inspects nothing proves nothing — the gate must fail, not pass.
+if (( scanned == 0 )); then
+  echo "error: check-ports.sh checked no files" >&2
+  exit 2
+fi
+echo "ports ok: every literal port is inside the band 61400-61499 in $scanned files"

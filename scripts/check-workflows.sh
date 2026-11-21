@@ -18,7 +18,10 @@ else
   files=(.github/workflows/*.yml .github/workflows/*.yaml)
 fi
 command -v python3 >/dev/null || { echo "check-workflows.sh: python3 is needed" >&2; exit 2; }
-((${#files[@]})) || { echo "workflows ok: no workflow files to check"; exit 0; }
+((${#files[@]})) || { echo "check-workflows.sh: no workflow files to check" >&2; exit 2; }
+for f in "${files[@]}"; do
+  [ -f "$f" ] || { echo "check-workflows.sh: no such file: $f" >&2; exit 2; }
+done
 
 python3 - "${files[@]}" <<'PY'
 import re, sys

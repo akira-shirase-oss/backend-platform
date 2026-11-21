@@ -33,7 +33,19 @@ rate="${RATE:-1000}"
 case "$mode" in smoke|full) ;; *) echo "MODE must be smoke or full" >&2; exit 2 ;; esac
 require_database tools
 port="${STARTER_LOAD_PORT:-61452}"
+# Validate before any arithmetic: $((port + 6)) on 'a[$(cmd)]' would run the command.
+case "$port" in ''|*[!0-9]*) echo "error: not a port number: $port" >&2; exit 2 ;; esac
 sink_port=$((port + 6))
+for p in "$port" "$sink_port"; do
+  if [ "$p" -lt 61400 ] || [ "$p" -gt 61499 ]; then
+    echo "error: $p is outside this project's port band 61400-61499 (STARTER_LOAD_PORT)" >&2
+    exit 2
+  fi
+done
+if [ "$port" = "$sink_port" ]; then
+  echo "error: the load port and the sink port must differ" >&2
+  exit 2
+fi
 base="http://127.0.0.1:$port"
 db="starter_load_$(date -u +%Y%m%d%H%M%S)_$$"
 work="$(mktemp -d "${TMPDIR:-/tmp}/starter-load.XXXXXX")"

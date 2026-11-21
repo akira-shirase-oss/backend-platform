@@ -18,6 +18,14 @@ cd "$(dirname "$0")/.."
 band="${PORT_BAND:=61400-61499}"
 [[ "$band" =~ ^[0-9]{2,5}-[0-9]{2,5}$ ]] || { echo "check-ports.sh: PORT_BAND must be <low>-<high>, got '$band'" >&2; exit 2; }
 band_low="${band%%-*}" band_high="${band##*-}"
+# A band must be non-empty and above Linux's ephemeral range (which ends at 60999);
+# 10# keeps a leading zero from being read as octal.
+if (( 10#$band_low > 10#$band_high )); then
+  echo "check-ports.sh: PORT_BAND low $band_low is above high $band_high" >&2; exit 2
+fi
+if (( 10#$band_low <= 60999 )); then
+  echo "check-ports.sh: PORT_BAND must start above the ephemeral range (60999)" >&2; exit 2
+fi
 
 if (( $# )); then
   files=("$@")
@@ -33,8 +41,10 @@ report() {
   fail=1
 }
 
+scanned=0
 for file in "${files[@]}"; do
   [ -f "$file" ] || continue
+  scanned=$((scanned + 1))
 
   # 127.0.0.1:NNNN / localhost:NNNN literals (two digits or more; :0 is ephemeral).
   while IFS= read -r hit; do
@@ -67,4 +77,9 @@ for file in "${files[@]}"; do
 done
 
 if (( fail )); then exit 1; fi
-echo "ports ok: every literal port is inside the band $band in ${#files[@]} files"
+# A check that inspects nothing proves nothing — the gate must fail, not pass.
+if (( scanned == 0 )); then
+  echo "error: check-ports.sh checked no files" >&2
+  exit 2
+fi
+echo "ports ok: every literal port is inside the band $band in $scanned files"

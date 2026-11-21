@@ -30,7 +30,19 @@ case "${1:-}" in
 esac
 require_database tools
 port="${STARTER_REHEARSAL_PORT:-61451}"
+# Validate before any arithmetic: $((port + 8)) on 'a[$(cmd)]' would run the command.
+case "$port" in ''|*[!0-9]*) echo "error: not a port number: $port" >&2; exit 2 ;; esac
 sink_port=$((port + 8))
+for p in "$port" "$sink_port"; do
+  if [ "$p" -lt 61400 ] || [ "$p" -gt 61499 ]; then
+    echo "error: $p is outside this project's port band 61400-61499 (STARTER_REHEARSAL_PORT)" >&2
+    exit 2
+  fi
+done
+if [ "$port" = "$sink_port" ]; then
+  echo "error: the rehearsal port and the sink port must differ" >&2
+  exit 2
+fi
 base="http://127.0.0.1:$port"
 db="starter_rehearsal_$(date -u +%Y%m%d%H%M%S)_$$"
 drill_begin upgrade-rehearsal "$out"
