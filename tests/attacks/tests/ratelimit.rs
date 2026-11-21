@@ -14,23 +14,29 @@ use reqwest::Method;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 
-/// Holds a request open: authenticated, valid headers, body dribbling forever.
+/// Holds a request open until aborted: authenticated, valid headers, body
+/// dribbling forever. `request_timeout` kills each dribble, so a dropped
+/// connection is re-established — the gate must stay full under a loaded
+/// machine, not only inside one request's lifetime.
 async fn hold(addr: String, name: &str) {
-    let Ok(mut stream) = TcpStream::connect(&addr).await else {
-        return;
-    };
-    let head = format!(
-        "PUT /v1/projects/hold-{name}/desired HTTP/1.1\r\nHost: x\r\nAuthorization: Bearer {TOKEN}\r\nContent-Type: application/json\r\nTransfer-Encoding: chunked\r\n\r\n"
-    );
-    if stream.write_all(head.as_bytes()).await.is_err() {
-        return;
-    }
-    let mut sink = [0_u8; 512];
-    for _ in 0..20 {
-        if stream.write_all(b"1\r\nx\r\n").await.is_err() {
-            return;
+    loop {
+        let Ok(mut stream) = TcpStream::connect(&addr).await else {
+            tokio::time::sleep(Duration::from_millis(50)).await;
+            continue;
+        };
+        let head = format!(
+            "PUT /v1/projects/hold-{name}/desired HTTP/1.1\r\nHost: x\r\nAuthorization: Bearer {TOKEN}\r\nContent-Type: application/json\r\nTransfer-Encoding: chunked\r\n\r\n"
+        );
+        if stream.write_all(head.as_bytes()).await.is_err() {
+            continue;
         }
-        let _ = tokio::time::timeout(Duration::from_millis(80), stream.read(&mut sink)).await;
+        let mut sink = [0_u8; 512];
+        loop {
+            if stream.write_all(b"1\r\nx\r\n").await.is_err() {
+                break;
+            }
+            let _ = tokio::time::timeout(Duration::from_millis(80), stream.read(&mut sink)).await;
+        }
     }
 }
 
