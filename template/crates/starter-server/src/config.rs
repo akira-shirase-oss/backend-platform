@@ -228,6 +228,7 @@ impl Problems {
     ) -> T {
         let raw = source
             .var(name)
+            // ATTACK(config-default)
             .unwrap_or_else(|| default_of(name).to_owned());
         match raw.parse::<T>() {
             Ok(v) if range.contains(&v) => v,
@@ -404,8 +405,8 @@ impl Config {
                 || host == "::1"
                 || host
                     .parse::<std::net::Ipv4Addr>()
-                    .map(|ip| ip.is_loopback())
-                    .unwrap_or(false);
+                    .is_ok_and(|ip| ip.is_loopback());
+            // ATTACK(public-url-loopback)
             if !loopback {
                 p.0.push(
                     "STARTER_PUBLIC_URL must be https unless it points at a loopback host"
@@ -559,7 +560,10 @@ mod tests {
             ("http://user@203.0.113.10", false),
         ] {
             let source = BTreeMap::from([
-                ("STARTER_DATABASE_URL", "postgres://u:pw@127.0.0.1:61432/app"),
+                (
+                    "STARTER_DATABASE_URL",
+                    "postgres://u:pw@127.0.0.1:61432/app",
+                ),
                 ("STARTER_PUBLIC_URL", url),
             ]);
             assert_eq!(

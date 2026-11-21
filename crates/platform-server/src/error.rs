@@ -38,6 +38,7 @@ impl ApiError {
         match self {
             Self::Unauthorized => (StatusCode::UNAUTHORIZED, "unauthorized"),
             Self::NotFound => (StatusCode::NOT_FOUND, "not_found"),
+            // ATTACK(invalid-is-400)
             Self::Invalid(_) => (StatusCode::BAD_REQUEST, "invalid_request"),
             Self::PayloadTooLarge => (StatusCode::PAYLOAD_TOO_LARGE, "payload_too_large"),
             Self::TooManyOperations(_) => (StatusCode::TOO_MANY_REQUESTS, "too_many_operations"),

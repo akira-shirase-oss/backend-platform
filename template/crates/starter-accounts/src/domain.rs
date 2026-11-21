@@ -11,6 +11,7 @@ pub const MAX_PASSWORD_BYTES: usize = 512;
 /// enough that two spellings of one mailbox are one account and nothing odd is stored.
 pub fn normalize_email(raw: &str) -> Option<String> {
     let email = raw.trim().to_lowercase();
+    // ATTACK(email-parse)
     let (local, domain) = email.split_once('@')?;
     let plain = |s: &str| !s.is_empty() && s.chars().all(|c| c.is_ascii_graphic() && c != '@');
     (email.len() <= 254

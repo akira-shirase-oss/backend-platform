@@ -51,7 +51,34 @@ pub fn router(accounts: Accounts) -> Router {
             "/workspaces/{workspace}/tokens/{token}",
             delete(delete_token),
         )
+        .layer(axum::middleware::from_fn_with_state(
+            accounts.clone(),
+            csrf_guard,
+        ))
         .with_state(accounts)
+}
+
+/// A session cookie rides along on cross-site posts, so a mutating request that
+/// presents one and an `Origin` that is not the kit's own URL is CSRF-shaped:
+/// refuse it before the handler runs. Bearer-token callers carry no ambient
+/// authority and are unaffected; safe methods are not state-changing.
+async fn csrf_guard(
+    axum::extract::State(accounts): axum::extract::State<Accounts>,
+    request: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> Result<axum::response::Response> {
+    // ATTACK(origin-check)
+    if !request.method().is_safe()
+        && crate::session_cookie(request.headers(), accounts.cookie_name()).is_some()
+        && request
+            .headers()
+            .get(axum::http::header::ORIGIN)
+            .and_then(|o| o.to_str().ok())
+            .is_some_and(|o| o != accounts.settings().public_url)
+    {
+        return Err(AccountsError::Forbidden);
+    }
+    Ok(next.run(request).await)
 }
 
 type Result<T> = std::result::Result<T, AccountsError>;
@@ -61,6 +88,7 @@ fn client(accounts: &Accounts, peer: SocketAddr, headers: &HeaderMap) -> ClientK
 }
 
 fn email(raw: &str) -> Result<String> {
+    // ATTACK(email-shape)
     domain::normalize_email(raw).ok_or(AccountsError::Invalid(
         "invalid_email",
         "the email address is not valid",
@@ -219,6 +247,7 @@ async fn request_reset(
             accounts.settings().reset_ttl,
         )
         .await?;
+        // ATTACK(reset-link-host)
         let link = format!("{}/reset?token={token}", accounts.settings().public_url);
         accounts
             .send(
@@ -321,6 +350,7 @@ async fn sign_in(
         None => None,
     };
     let verified = found.as_ref().is_some_and(|u| u.verified);
+    // ATTACK(signin-indistinct)
     let checked = check_credentials(
         &accounts,
         address,
@@ -336,6 +366,7 @@ async fn sign_in(
     if !verified {
         return Err(AccountsError::EmailUnverified);
     }
+    // ATTACK(session-rotation)
     let session = tokens::new_hex_secret().map_err(internal)?;
     let settings = accounts.settings();
     store::signed_in(

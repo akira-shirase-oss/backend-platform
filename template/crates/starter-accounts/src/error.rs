@@ -80,6 +80,7 @@ impl IntoResponse for AccountsError {
     fn into_response(self) -> Response {
         use StatusCode as S;
         match self {
+            // ATTACK(invalid-is-422)
             Self::Invalid(code, message) => error(S::UNPROCESSABLE_ENTITY, code, message),
             Self::InviteInvalid => error(
                 S::FORBIDDEN,

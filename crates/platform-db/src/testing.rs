@@ -11,7 +11,7 @@
 )]
 
 use std::str::FromStr;
-use std::sync::{LazyLock, OnceLock};
+use std::sync::LazyLock;
 use std::time::Duration;
 
 use sqlx::postgres::{PgConnectOptions, PgPool, PgPoolOptions};
@@ -44,23 +44,11 @@ pub enum Role {
 /// on a loaded server — tests wait their turn rather than pile up and time out.
 static PERMITS: LazyLock<Semaphore> = LazyLock::new(|| Semaphore::new(4));
 
-/// A process-wide runtime for the best-effort drop in [`TestDb::drop`]: each
-/// `#[tokio::test]` runtime dies with its test, so work spawned there can be aborted
-/// before the database is actually dropped. Multi-threaded so it drives itself.
-static CLEANUP_RT: OnceLock<tokio::runtime::Runtime> = OnceLock::new();
-
-fn cleanup_rt() -> &'static tokio::runtime::Runtime {
-    CLEANUP_RT.get_or_init(|| {
-        tokio::runtime::Builder::new_multi_thread()
-            .worker_threads(1)
-            .enable_all()
-            .build()
-            .expect("building the test-database cleanup runtime")
-    })
-}
-
 /// A freshly created and migrated database, dropped by [`TestDb::cleanup`] — or, when a
-/// test forgets to call it, best-effort by `Drop` on [`CLEANUP_RT`].
+/// test forgets to call it, by `Drop` on a joined thread with its own runtime (each
+/// `#[tokio::test]` runtime dies with its test, so work spawned there can be aborted
+/// before the database is actually dropped, and libtest can exit before a spawned task
+/// finishes either way).
 #[derive(Debug)]
 pub struct TestDb {
     /// A pool on the new database, as the runtime role.
@@ -83,18 +71,20 @@ impl TestDb {
             panic!("{ENV} is not set; start the stack with `scripts/stack.sh up` and export it")
         });
         let name = format!("bp_test_{}", Uuid::now_v7().simple());
-        let permit = PERMITS
-            .acquire()
+        let permit = tokio::time::timeout(Duration::from_secs(120), PERMITS.acquire())
             .await
+            .expect("timed out after 120 s waiting for a test-database slot")
             .expect("the test-database semaphore never closes");
         bootstrap(&admin_url, &name, OWNER_PASSWORD, RUNTIME_PASSWORD)
             .await
             .expect("bootstrapping the test database and roles");
-        let mut db = Self {
-            pool: PgPoolOptions::new().connect_lazy_with(
-                PgConnectOptions::from_str(&admin_url)
-                    .expect("invariant: BP_TEST_DATABASE_URL parses"),
-            ),
+        // The pool the server under test runs on gets production pool settings; the
+        // small bounded pools from connect_as are for test-side helper queries only.
+        let runtime_url = role_url(&admin_url, RUNTIME_ROLE, RUNTIME_PASSWORD, &name)
+            .expect("invariant: BP_TEST_DATABASE_URL is a postgres URL");
+        let db = Self {
+            pool: crate::pool::connect_lazy(&runtime_url, &crate::PoolSettings::default())
+                .expect("invariant: the runtime URL parses"),
             admin_url,
             name,
             cleaned: false,
@@ -106,8 +96,6 @@ impl TestDb {
             .await
             .expect("migrating the test database as the owner");
         owner.close().await;
-        let pool = db.connect_as(Role::Runtime).await;
-        db.pool = pool;
         db
     }
 
@@ -137,8 +125,10 @@ impl TestDb {
         self.url_as(Role::Runtime)
     }
 
-    /// A small pool on this database as `role`: two connections, and an acquire timeout
-    /// that is a liveness bound only — a loaded machine must wait, never time a test out.
+    /// A small helper pool on this database as `role`, for test-side queries: two
+    /// connections, and an acquire timeout that is a liveness bound only — a loaded
+    /// machine must wait, never time a test out. The pool the server under test runs
+    /// on is `TestDb::pool`, which keeps production pool settings.
     pub async fn connect_as(&self, role: Role) -> PgPool {
         let options =
             crate::pool::connect_options(&self.url_as(role), &crate::PoolSettings::default())
@@ -179,16 +169,22 @@ async fn drop_database(pool: &PgPool, admin_url: &str, name: &str) {
 impl Drop for TestDb {
     fn drop(&mut self) {
         // Tests should call cleanup(); this is the net for the ones that cannot — an
-        // attack `Instance` is simply dropped when the test ends, and each `#[tokio::test]`
-        // runtime dies too early to drive spawned work, so the drop runs on CLEANUP_RT.
+        // attack `Instance` is simply dropped when the test ends.
         if self.cleaned {
             return;
         }
         let pool = self.pool.clone();
         let admin_url = self.admin_url.clone();
         let name = self.name.clone();
-        cleanup_rt().spawn(async move {
-            drop_database(&pool, &admin_url, &name).await;
-        });
+        // A spawned task can be orphaned when libtest exits after the last test, so the
+        // drop is driven to completion on a joined thread with its own runtime.
+        let _ = std::thread::spawn(move || {
+            tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .expect("building the drop runtime")
+                .block_on(drop_database(&pool, &admin_url, &name));
+        })
+        .join();
     }
 }

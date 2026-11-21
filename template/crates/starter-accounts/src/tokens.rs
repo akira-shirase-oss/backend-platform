@@ -76,6 +76,7 @@ pub fn looks_like_api_token(token: &str) -> bool {
 
 /// True for text shaped like a session id or an email link token (64 hex digits).
 pub fn looks_like_hex_secret(secret: &str) -> bool {
+    // ATTACK(token-shape)
     secret.len() == 64 && secret.bytes().all(|b| b.is_ascii_hexdigit())
 }
 

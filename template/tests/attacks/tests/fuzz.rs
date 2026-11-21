@@ -15,7 +15,8 @@ use std::path::Path;
 use axum::http::{HeaderMap, HeaderValue};
 use proptest::prelude::*;
 use proptest::strategy::{Strategy, ValueTree};
-use starter_accounts::{domain, tokens};
+use proptest::test_runner::TestRunner;
+use starter_accounts::{api_token, domain, session_cookie, tokens};
 use starter_http::client::ClientKey;
 use starter_server::config::{self, Source};
 
@@ -27,6 +28,24 @@ impl Source for MapSource {
         self.0.get(name).cloned()
     }
 }
+
+/// Every configuration variable the parser actually reads — the fuzzer hits real
+/// names, not generated keys that map to nothing.
+const CONFIG_VARS: &[&str] = &[
+    "STARTER_LISTEN",
+    "STARTER_PUBLIC_URL",
+    "STARTER_DATABASE_URL",
+    "STARTER_ADMIN_DATABASE_URL",
+    "STARTER_APP_PASSWORD",
+    "STARTER_SMTP_RELAY",
+    "STARTER_MAIL_FROM",
+    "STARTER_TRUSTED_PROXIES",
+    "STARTER_COOKIE_SECURE",
+    "STARTER_LOG_FORMAT",
+    "STARTER_MAX_BODY_BYTES",
+    "STARTER_HEADER_READ_TIMEOUT_MS",
+    "STARTER_DB_MAX_CONNECTIONS",
+];
 
 /// Feeds one input into `target`'s parsers.
 fn apply(target: &str, bytes: &[u8]) {
@@ -50,14 +69,32 @@ fn apply(target: &str, bytes: &[u8]) {
         "email" => {
             let _ = domain::normalize_email(&text);
         }
+        "session_cookie" => {
+            let mut map = HeaderMap::new();
+            if let Ok(v) = HeaderValue::from_bytes(bytes) {
+                map.append("cookie", v);
+            }
+            let _ = session_cookie(&map, "starter_session");
+            let _ = session_cookie(&map, "x");
+        }
+        "authorization" => {
+            let mut map = HeaderMap::new();
+            for part in text.split(',') {
+                if let Ok(v) = HeaderValue::from_str(part.trim()) {
+                    map.append("authorization", v);
+                }
+            }
+            let _ = api_token(&map);
+        }
         "password" => {
             let _ = domain::check_password(&text);
         }
         "config" => {
-            let value = text.into_owned();
+            // Real variable names with generated values — a parser is only exercised
+            // when the key is one it reads. Byte 0 picks the variable.
             let mut map = BTreeMap::new();
-            for var in ["STARTER_PUBLIC_URL", "STARTER_TRUSTED_PROXIES"] {
-                map.insert(var.to_owned(), value.clone());
+            for var in CONFIG_VARS {
+                map.insert((*var).to_owned(), text.to_string());
             }
             let _ = config::Config::load(&MapSource(map));
         }
@@ -119,20 +156,50 @@ proptest! {
 
     #[test]
     fn config_never_panics_or_accepts_garbage(
-        pairs in prop::collection::vec(any::<(String, String)>(), 0..16),
+        pairs in prop::collection::vec(any::<(usize, String)>(), 0..16),
     ) {
-        let map: BTreeMap<String, String> = pairs.into_iter().collect();
+        // Real variable names — generated keys a parser never reads exercise nothing.
+        let map: BTreeMap<String, String> = pairs
+            .into_iter()
+            .map(|(i, v)| (CONFIG_VARS[i % CONFIG_VARS.len()].to_owned(), v))
+            .collect();
         let _ = config::Config::load(&MapSource(map));
+    }
+
+    #[test]
+    fn session_cookie_never_panics(values in prop::collection::vec(any::<Vec<u8>>(), 0..4)) {
+        // Several Cookie headers — HTTP/2 may split them; opaque bytes must never panic.
+        let mut map = HeaderMap::new();
+        for v in &values {
+            if let Ok(v) = HeaderValue::from_bytes(v) {
+                map.append("cookie", v);
+            }
+        }
+        let _ = session_cookie(&map, "starter_session");
+    }
+
+    #[test]
+    fn authorization_never_panics(values in prop::collection::vec(any::<Vec<u8>>(), 0..4)) {
+        // Multi-value Authorization, opaque bytes: duplicates refused, never a panic.
+        let mut map = HeaderMap::new();
+        for v in &values {
+            if let Ok(v) = HeaderValue::from_bytes(v) {
+                map.append("authorization", v);
+            }
+        }
+        let _ = api_token(&map);
     }
 }
 
 /// Arbitrary bytes as request bodies through the real router: never a 5xx,
-/// never a panic (a panic would surface as `CatchPanic`'s 500).
+/// never a panic (a panic would surface as `CatchPanic`'s 500). A fixed seed so a
+/// failure reproduces verbatim; the failing bytes print on failure.
 #[tokio::test]
 async fn request_bodies_through_the_router_never_5xx() {
     let s = common::spawn().await;
     let client = reqwest::Client::new();
-    let mut runner = proptest::test_runner::TestRunner::default();
+    // Deterministic: the same generated bodies every run, so a failure reproduces.
+    let mut runner = TestRunner::deterministic();
     let inputs: Vec<Vec<u8>> = (0..64)
         .map(|_| any::<Vec<u8>>().new_tree(&mut runner).unwrap().current())
         .collect();
@@ -147,9 +214,37 @@ async fn request_bodies_through_the_router_never_5xx() {
                 .unwrap();
             assert!(
                 !r.status().is_server_error(),
-                "{path} on generated body {i} → {}",
-                r.status()
+                "{path} on generated body {i} → {}; bytes (hex): {}",
+                r.status(),
+                bytes.iter().fold(String::new(), |mut s, b| {
+                    use std::fmt::Write as _;
+                    let _ = write!(s, "{b:02x}");
+                    s
+                })
             );
         }
+    }
+}
+
+/// Garbage in a real variable is refused, and the refusal names the variable — a
+/// parser that accepts anything would pass the never-panic property while being wrong.
+#[test]
+fn config_refuses_garbage_values_and_names_the_variable() {
+    for (var, bad) in [
+        ("STARTER_PUBLIC_URL", "gopher://example.test"),
+        ("STARTER_PUBLIC_URL", "http://8.8.8.8"),
+        ("STARTER_LISTEN", "not-an-addr"),
+        ("STARTER_MAX_BODY_BYTES", "notanumber"),
+        ("STARTER_COOKIE_SECURE", "maybe"),
+        ("STARTER_TRUSTED_PROXIES", "999.1.1.1"),
+        ("STARTER_HEADER_READ_TIMEOUT_MS", "-5"),
+    ] {
+        let mut map = BTreeMap::new();
+        map.insert(var.to_owned(), bad.to_owned());
+        let err = config::Config::load(&MapSource(map)).unwrap_err();
+        assert!(
+            err.iter().any(|e| e.contains(var)),
+            "{var}={bad}: not refused by name — {err:?}"
+        );
     }
 }

@@ -7,8 +7,8 @@
 # Toolchain pin, formatting, Clippy with warnings denied, the architecture, pin, port-band,
 # workflow-YAML and results checks (each shown able to fail), the host layer's checks, every test against PostgreSQL
 # (the local stack starts when STARTER_TEST_DATABASE_URL is unset), the restore drills with
-# their controls and the upgrade rehearsal, then cargo-deny. The limit proofs
-# (scripts/prove-limits.sh) run as their own CI job.
+# their controls and the upgrade rehearsal, then cargo-deny. The limit and attack proofs
+# (scripts/prove-limits.sh, scripts/prove-attacks.sh) run as their own CI jobs.
 #
 # Needs: the pinned toolchain through rustup, docker (or STARTER_TEST_DATABASE_URL), and
 # cargo-deny (skipped with a note when absent; CI always runs it).

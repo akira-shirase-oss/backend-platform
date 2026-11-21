@@ -330,11 +330,11 @@ pub fn apply(router: Router, limits: StackLimits, window: Arc<ErrorWindow>) -> R
         //    stalled; either way the slot comes back.
         .layer(TimeoutLayer::with_status_code(
             StatusCode::SERVICE_UNAVAILABLE,
-            limits.request_timeout, // LIMIT(request-timeout)
+            limits.request_timeout, // LIMIT(request-timeout) ATTACK(request-timeout)
         ))
         // 9–10. Body limits, by Content-Length up front and while streaming.
-        .layer(RequestBodyLimitLayer::new(limits.max_body_bytes)) // LIMIT(body)
-        .layer(DefaultBodyLimit::max(limits.max_body_bytes)); // LIMIT(body)
+        .layer(RequestBodyLimitLayer::new(limits.max_body_bytes)) // LIMIT(body) ATTACK(body-limit)
+        .layer(DefaultBodyLimit::max(limits.max_body_bytes)); // LIMIT(body) ATTACK(body-limit)
     router.layer(stack)
 }
 

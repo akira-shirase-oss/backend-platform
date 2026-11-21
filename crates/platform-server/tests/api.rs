@@ -305,8 +305,8 @@ async fn a_dead_control_database_is_reported_honestly() {
     );
 }
 
-/// An empty or too-short admin token is refused at AppState::new (the review's item 9):
-/// a config that skipped from_env validation must not produce a state that
+/// An empty or too-short admin token is refused at `AppState::new` (the review's item 9):
+/// a config that skipped `from_env` validation must not produce a state that
 /// authenticates `Bearer ` — anything or nothing — as admin.
 #[tokio::test]
 async fn an_empty_or_short_admin_token_is_refused() {

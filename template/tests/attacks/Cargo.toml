@@ -13,11 +13,13 @@ proptest.workspace = true
 reqwest.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+sqlx.workspace = true
 starter-accounts = { workspace = true, features = ["test-support"] }
 starter-db = { workspace = true, features = ["test-support"] }
 starter-http.workspace = true
 starter-server.workspace = true
 tokio.workspace = true
+tokio-util.workspace = true
 uuid.workspace = true
 
 [lints]

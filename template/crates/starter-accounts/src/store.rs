@@ -75,6 +75,7 @@ pub struct NewUser<'a> {
 /// one transaction: a taken email leaves the invite unclaimed.
 pub async fn sign_up(db: &PgPool, user: &NewUser<'_>) -> Result<(), AccountsError> {
     let mut tx = db.begin().await?;
+    // ATTACK(invite-single-use)
     let claimed = sqlx::query(
         "UPDATE invites SET used_at = now()
           WHERE digest = $1 AND used_at IS NULL AND expires_at > now()",
@@ -82,6 +83,7 @@ pub async fn sign_up(db: &PgPool, user: &NewUser<'_>) -> Result<(), AccountsErro
     .bind(&user.invite[..])
     .execute(&mut *tx)
     .await?;
+    // ATTACK(invite-required)
     if claimed.rows_affected() != 1 {
         return Err(AccountsError::InviteInvalid);
     }
@@ -92,6 +94,7 @@ pub async fn sign_up(db: &PgPool, user: &NewUser<'_>) -> Result<(), AccountsErro
         .execute(&mut *tx)
         .await;
     match inserted {
+        // ATTACK(signup-no-disclosure)
         Err(e) if starter_db::is_unique_violation(&e) => return Err(AccountsError::EmailTaken),
         other => {
             other?;
@@ -151,6 +154,7 @@ pub async fn replace_email_token(
 /// expired token.
 pub async fn verify(db: &PgPool, digest: [u8; 32]) -> Result<bool, AccountsError> {
     let mut tx = db.begin().await?;
+    // ATTACK(verify-single-use)
     let user: Option<Uuid> = sqlx::query_scalar(
         "UPDATE email_tokens SET used_at = now()
           WHERE digest = $1 AND purpose = 'verify' AND used_at IS NULL AND expires_at > now()
@@ -179,6 +183,7 @@ pub async fn reset_password(
     hash: &str,
 ) -> Result<Option<Uuid>, AccountsError> {
     let mut tx = db.begin().await?;
+    // ATTACK(reset-single-use) ATTACK(reset-expiry)
     let user: Option<Uuid> = sqlx::query_scalar(
         "UPDATE email_tokens SET used_at = now()
           WHERE digest = $1 AND purpose = 'reset' AND used_at IS NULL AND expires_at > now()
@@ -312,6 +317,7 @@ pub async fn session_user(
 
 /// Ends a session.
 pub async fn delete_session(db: &PgPool, digest: [u8; 32]) -> Result<Option<Uuid>, AccountsError> {
+    // ATTACK(sign-out-revokes)
     Ok(
         sqlx::query_scalar("DELETE FROM sessions WHERE digest = $1 RETURNING user_id")
             .bind(&digest[..])

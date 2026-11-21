@@ -21,9 +21,11 @@ pub fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
 pub fn bearer_token(headers: &axum::http::HeaderMap) -> Option<&str> {
     let mut values = headers.get_all(header::AUTHORIZATION).iter();
     let value = values.next()?;
+    // ATTACK(dup-authorization)
     if values.next().is_some() {
         return None;
     }
+    // ATTACK(header-parse)
     value.to_str().ok()?.strip_prefix("Bearer ")
 }
 
@@ -35,11 +37,13 @@ pub async fn require_admin(
 ) -> Response {
     let presented = bearer_token(request.headers());
     match presented {
+        // ATTACK(require-admin)
         Some(token)
             if constant_time_eq(token.as_bytes(), state.admin_token.expose().as_bytes()) =>
         {
             next.run(request).await
         }
+        // ATTACK(anonymous-refused)
         _ => ApiError::Unauthorized.into_response(),
     }
 }

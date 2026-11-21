@@ -19,6 +19,7 @@ pub const MAX_IDEMPOTENCY_KEY_LEN: usize = 128;
 
 /// Liveness: the process answers.
 pub async fn livez() -> &'static str {
+    // ATTACK(livez-minimal)
     "ok"
 }
 
@@ -33,6 +34,7 @@ pub async fn readyz(State(state): State<AppState>) -> Response {
 }
 
 fn project_id(raw: &str) -> Result<ProjectId, ApiError> {
+    // ATTACK(project-id-parse)
     ProjectId::parse(raw).map_err(|e| ApiError::Invalid(e.to_string()))
 }
 
@@ -49,6 +51,7 @@ pub fn idempotency_key(headers: &HeaderMap) -> Result<Option<String>, ApiError> 
     let key = value
         .to_str()
         .ok()
+        // ATTACK(idempotency-key-shape)
         .filter(|k| {
             (1..=MAX_IDEMPOTENCY_KEY_LEN).contains(&k.len())
                 && k.bytes().all(|b| b.is_ascii_graphic())
@@ -111,6 +114,7 @@ pub async fn project_status(
     let project = project_id(&project)?;
     let status = platform_db::project_status(&state.db, &project)
         .await?
+        // ATTACK(operation-lookup)
         .ok_or(ApiError::NotFound)?;
     Ok(Json(status).into_response())
 }
@@ -123,6 +127,7 @@ pub async fn get_operation(
     let id = operation_id(&id)?;
     let operation = platform_db::log::get(&state.db, id)
         .await?
+        // ATTACK(operation-lookup)
         .ok_or(ApiError::NotFound)?;
     Ok(Json(operation).into_response())
 }

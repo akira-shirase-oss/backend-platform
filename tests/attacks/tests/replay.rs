@@ -58,21 +58,46 @@ async fn the_same_key_with_a_different_payload_is_refused() {
         "key reuse with a different payload → {}",
         second.status()
     );
+
+    // The refused payload never landed: stored desired state is still the first write.
+    let state = client
+        .get(s.url("/v1/projects/shop"))
+        .bearer_auth(TOKEN)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(state.status().as_u16(), 200);
+    let state: Value = state.json().await.unwrap();
+    assert_eq!(
+        state["desired"]["databases"],
+        json!(["a"]),
+        "the conflicted write changed stored state: {state}"
+    );
 }
 
 #[tokio::test]
 async fn malformed_idempotency_keys_are_refused() {
     let s = spawn().await;
     let client = reqwest::Client::new();
+    // A body that names a resource — otherwise the request is refused for that
+    // reason and the key check never has to fire.
     for key in ["", "has space", &"k".repeat(200), "tab\there"] {
         let r = client
             .put(s.url("/v1/projects/shop/desired"))
             .bearer_auth(TOKEN)
             .header("idempotency-key", key)
-            .json(&json!({ "databases": [] }))
+            .json(&json!({ "databases": ["main"] }))
             .send()
             .await
             .unwrap();
-        assert!(r.status().is_client_error(), "key {key:?} → {}", r.status());
+        assert_eq!(r.status().as_u16(), 400, "key {key:?}");
+        let body: Value = r.json().await.unwrap();
+        assert!(
+            body["error"]["message"]
+                .as_str()
+                .unwrap()
+                .contains("Idempotency-Key"),
+            "key {key:?} refused for a different reason: {body}"
+        );
     }
 }

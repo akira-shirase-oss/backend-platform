@@ -58,6 +58,7 @@ impl ProjectId {
     /// Validates a project id.
     pub fn parse(value: &str) -> Result<Self, IdError> {
         const WHAT: &str = "project id";
+        // ATTACK(id-len)
         check_len(value, WHAT, &PROJECT_ID_LEN)?;
         if !value.starts_with(|c: char| c.is_ascii_lowercase()) {
             return Err(IdError::Start { what: WHAT });
@@ -109,10 +110,12 @@ impl LogicalName {
     /// Validates a logical name.
     pub fn parse(value: &str) -> Result<Self, IdError> {
         const WHAT: &str = "resource name";
+        // ATTACK(name-len)
         check_len(value, WHAT, &LOGICAL_NAME_LEN)?;
         if !value.starts_with(|c: char| c.is_ascii_lowercase()) {
             return Err(IdError::Start { what: WHAT });
         }
+        // ATTACK(name-charset)
         let charset_ok = value
             .bytes()
             .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_');
@@ -173,6 +176,7 @@ impl ProviderResourceId {
     /// Validates an id returned by a provider.
     pub fn parse(value: &str) -> Result<Self, IdError> {
         const WHAT: &str = "provider resource id";
+        // ATTACK(provider-id-len)
         check_len(value, WHAT, &(1..=MAX_PROVIDER_ID_LEN))?;
         if !value.bytes().all(|b| b.is_ascii_graphic()) {
             return Err(IdError::Charset {

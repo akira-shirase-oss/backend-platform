@@ -201,8 +201,10 @@ pub async fn serve(
     let cut = CancellationToken::new();
     let mut http = hyper::server::conn::http1::Builder::new();
     http.timer(TokioTimer::new());
+    // ATTACK(header-read)
     http.header_read_timeout(limits.header_read_timeout); // LIMIT(header-read)
     http.keep_alive(true);
+    // ATTACK(header-cap)
     http.max_buf_size(64 * 1024);
     loop {
         // The permit first: past the cap a connection waits in the backlog, not in a task.

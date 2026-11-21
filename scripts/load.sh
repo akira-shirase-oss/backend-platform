@@ -32,7 +32,9 @@ case "$mode" in smoke|full) ;; *) echo "MODE must be smoke or full" >&2; exit 2 
 # checkout or another project on the shared machine never collides with it.
 for port in "$server_port" "$fake_port"; do
   case "$port" in ''|*[!0-9]*) echo "error: not a port number: $port" >&2; exit 2 ;; esac
-  if [ "$port" -lt 61400 ] || [ "$port" -gt 61499 ]; then
+  # [ -lt ] returns status 2 on an out-of-range integer, which `||` reads as in-band;
+  # 10# keeps a leading zero decimal and a wrapped huge number still fails the range test.
+  if ! { [[ $port =~ ^[1-9][0-9]{0,4}$ ]] && (( 10#$port >= 61400 && 10#$port <= 61499 )); }; then
     echo "error: $port is outside this project's port band 61400-61499 (BP_SERVER_PORT, BP_FAKE_PORT)" >&2
     exit 2
   fi

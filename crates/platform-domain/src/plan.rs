@@ -21,6 +21,7 @@ pub const REALM_NAME: &str = "realm";
 
 /// What a project asks for. Unknown fields are refused, not ignored.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+// ATTACK(known-fields)
 #[serde(deny_unknown_fields)]
 pub struct DesiredState {
     /// Databases, each with its own owner role.

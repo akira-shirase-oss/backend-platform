@@ -37,7 +37,10 @@ port="${STARTER_LOAD_PORT:-61452}"
 case "$port" in ''|*[!0-9]*) echo "error: not a port number: $port" >&2; exit 2 ;; esac
 sink_port=$((port + 6))
 for p in "$port" "$sink_port"; do
-  if [ "$p" -lt 61400 ] || [ "$p" -gt 61499 ]; then
+  # [ -lt ] returns status 2 on an out-of-range integer, which `||` reads as in-band;
+  # 10# also keeps a leading zero from being octal. Bash 3.2 wraps a huge number in
+  # arithmetic, so the range test, not the digit test, is what fails closed.
+  if ! { [[ $p =~ ^[1-9][0-9]{0,4}$ ]] && (( 10#$p >= 61400 && 10#$p <= 61499 )); }; then
     echo "error: $p is outside this project's port band 61400-61499 (STARTER_LOAD_PORT)" >&2
     exit 2
   fi

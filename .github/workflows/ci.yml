@@ -163,6 +163,68 @@ jobs:
           eval "$(scripts/stack.sh env)"
           scripts/prove-limits.sh
 
+  # Every attack test must fail without its protection: each ATTACK(name) marker in the
+  # source maps to a mutation, the mutated tree runs the named test, and the proof only
+  # accepts a real test failure (not a compile error). Its own job so it reports on every
+  # push even when another suite is red.
+  attacks:
+    name: every attack test fails without its protection (platform)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    services:
+      postgres:
+        # Same image and digest as deploy/compose.yaml.
+        image: postgres:18.7-trixie@sha256:2ea8630df176ad090ec92136dee850397c5af8781e4bcf2e4162593691c61bbc
+        env:
+          POSTGRES_USER: platform
+          POSTGRES_PASSWORD: platform-dev
+          POSTGRES_DB: platform
+        ports:
+          - 61432:5432
+        options: >-
+          --health-cmd "pg_isready --host=127.0.0.1 --username=platform --dbname=platform"
+          --health-interval 2s
+          --health-timeout 3s
+          --health-retries 30
+    env:
+      BP_TEST_DATABASE_URL: postgres://platform:platform-dev@127.0.0.1:61432/platform
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install the pinned toolchain
+        run: |
+          channel=$(sed -n 's/^channel = "\(.*\)"$/\1/p' rust-toolchain.toml)
+          rustup toolchain install "$channel" --profile minimal --component clippy,rustfmt
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      - name: Prove every attack test
+        run: scripts/prove-attacks.sh
+
+  template-attacks:
+    name: every attack test fails without its protection (starter template)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    defaults:
+      run:
+        working-directory: template
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install the pinned toolchain
+        run: |
+          channel=$(sed -n 's/^channel = "\(.*\)"$/\1/p' rust-toolchain.toml)
+          rustup toolchain install "$channel" --profile minimal --component clippy,rustfmt
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          workspaces: template
+      - name: Database
+        run: scripts/stack.sh up
+      - name: Prove every attack test
+        run: |
+          eval "$(scripts/stack.sh env)"
+          scripts/prove-attacks.sh
+
   # Copy and own: the copy script renames the template for a product, and the copy builds,
   # passes clippy and its tests with no template name left (template/docs/COPYING.md).
   template-copy:

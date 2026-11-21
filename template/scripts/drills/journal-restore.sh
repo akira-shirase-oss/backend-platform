@@ -32,10 +32,18 @@ while [ $# -gt 0 ]; do
   esac
 done
 [ -x "$server" ] && [ -x "$cli" ] && [ -f "$handler" ] || { echo "usage: journal-restore.sh --server BIN --cli BIN --handler PATH" >&2; exit 2; }
+# Validate before any arithmetic: $((port + 1)) on 'a[$(cmd)]' would run the command.
+case "$port" in ''|*[!0-9]*) echo "error: not a port number: $port" >&2; exit 2 ;; esac
+hport=$((port + 1)) rport=$((port + 2))
+for p in "$port" "$hport" "$rport"; do
+  if ! { [[ $p =~ ^[1-9][0-9]{0,4}$ ]] && (( 10#$p >= 61400 && 10#$p <= 61499 )); }; then
+    echo "error: $p is outside this project's port band 61400-61499 (--port)" >&2
+    exit 2
+  fi
+done
 drill_begin journal-restore "$out"
 DURABLE_API_KEY="$(python3 -I -c 'import secrets; print(secrets.token_hex(32))')"
 export DURABLE_API_KEY
-hport=$((port + 1)) rport=$((port + 2))
 pids=()
 cleanup() {
   for pid in ${pids[@]+"${pids[@]}"}; do kill "$pid" 2>/dev/null || true; done

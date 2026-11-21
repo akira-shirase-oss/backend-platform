@@ -38,6 +38,8 @@ pub struct Instance {
     pub sink: SmtpSink,
     /// The database (invites are seeded through it).
     pub db: TestDb,
+    /// The kit itself, for checks that must call below the HTTP layer.
+    pub accounts: Accounts,
     server: JoinHandle<()>,
 }
 
@@ -141,7 +143,7 @@ pub async fn spawn_with(tune: impl FnOnce(&mut (Settings, StackLimits))) -> Inst
     )
     .await
     .unwrap();
-    let app = Router::new().nest("/v1", starter_accounts::router(accounts));
+    let app = Router::new().nest("/v1", starter_accounts::router(accounts.clone()));
     let app = stack::apply(app, limits, Arc::new(ErrorWindow::default()));
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
@@ -157,6 +159,51 @@ pub async fn spawn_with(tune: impl FnOnce(&mut (Settings, StackLimits))) -> Inst
         base: format!("http://{addr}"),
         sink,
         db,
+        accounts,
+        server,
+    }
+}
+
+/// Spawns behind the production connection loop (`serve::serve`), so the bounds under
+/// test — the header-read deadline, the head buffer cap, connection limits — are the
+/// shipped ones, not `axum::serve`'s.
+pub async fn spawn_serve() -> Instance {
+    let db = TestDb::new().await;
+    let sink = SmtpSink::start("127.0.0.1:0", None).await.unwrap();
+    let settings = Settings {
+        public_url: "https://app.example.test".to_owned(),
+        cookie_secure: false,
+        ..Settings::default()
+    };
+    let accounts = Accounts::new(
+        db.pool.clone(),
+        settings,
+        Arc::new(SmtpRelay::new(sink.addr).unwrap()),
+    )
+    .await
+    .unwrap();
+    let app = Router::new().nest("/v1", starter_accounts::router(accounts.clone()));
+    let app = stack::apply(
+        app,
+        StackLimits::default(),
+        Arc::new(ErrorWindow::default()),
+    );
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let server = tokio::spawn(async move {
+        starter_http::serve::serve(
+            listener,
+            app,
+            starter_http::serve::ConnectionLimits::default(),
+            tokio_util::sync::CancellationToken::new(),
+        )
+        .await;
+    });
+    Instance {
+        base: format!("http://{addr}"),
+        sink,
+        db,
+        accounts,
         server,
     }
 }

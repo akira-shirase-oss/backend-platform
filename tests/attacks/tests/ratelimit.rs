@@ -45,10 +45,24 @@ async fn the_shed_gate_cannot_be_evaded_by_spoofed_client_headers() {
     .await;
     let client = reqwest::Client::new();
 
-    // Fill both slots with held, dribbling requests.
+    // Fill both slots with held, dribbling requests, then wait on observed state:
+    // poll until a request is shed, so the spoof loop below only runs once the
+    // gate is provably full (a fixed sleep can race the slot acquisition).
     let h1 = tokio::spawn(hold(s.addr().to_owned(), "a"));
     let h2 = tokio::spawn(hold(s.addr().to_owned(), "b"));
-    tokio::time::sleep(Duration::from_millis(250)).await;
+    let deadline = std::time::Instant::now() + Duration::from_secs(10);
+    loop {
+        let r = authed(&client, Method::GET, &s.url("/v1/operation-counts")).await;
+        if r.status().as_u16() == 503 {
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the gate never filled: {}",
+            r.status()
+        );
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
 
     // Every spoof attempt must still be shed with 503 while the gate is full.
     for i in 0..6 {

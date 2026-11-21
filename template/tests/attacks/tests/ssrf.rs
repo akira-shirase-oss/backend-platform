@@ -48,11 +48,7 @@ async fn reset_links_come_from_the_configured_url_not_the_request() {
             "{name} request refused before it could exercise the link builder: {}",
             r.status()
         );
-        let mail = s
-            .sink
-            .latest_to(&email)
-            .await
-            .expect("reset mail was sent");
+        let mail = s.sink.latest_to(&email).await.expect("reset mail was sent");
         assert!(
             mail.data.contains("https://app.example.test/"),
             "mail steered by the {name} header: {}",

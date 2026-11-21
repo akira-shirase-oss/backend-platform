@@ -67,6 +67,17 @@ for root, dirs, files in os.walk(dest):
         try:
             text = open(path, encoding="utf-8").read()
         except UnicodeDecodeError:
+            # Non-UTF-8 inputs (fuzz corpora) can still carry a template name:
+            # decode byte-exact so the same rules can rewrite it, then write the
+            # bytes back losslessly.
+            raw = open(path, "rb").read()
+            text = raw.decode("utf-8", errors="surrogateescape")
+            new = text
+            for pattern, replacement in rules:
+                new = pattern.sub(replacement, new)
+            if new != text:
+                open(path, "wb").write(new.encode("utf-8", errors="surrogateescape"))
+                changed += 1
             continue
         new = text
         for pattern, replacement in rules:

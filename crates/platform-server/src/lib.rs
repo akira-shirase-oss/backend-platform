@@ -70,6 +70,7 @@ pub fn app(config: &Config, state: AppState) -> Router {
             state.gate.clone(),
             middleware::shed_load,
         ));
+    // ATTACK(no-fallback)
     let router = Router::new()
         .route("/livez", get(handlers::livez))
         .route("/readyz", get(handlers::readyz))

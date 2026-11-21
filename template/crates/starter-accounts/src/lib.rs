@@ -233,19 +233,9 @@ impl Accounts {
 
     /// The caller: an `Authorization: Bearer` API token, else the session cookie.
     pub async fn principal(&self, headers: &HeaderMap) -> Result<Principal, AccountsError> {
-        let mut authorization = headers.get_all(header::AUTHORIZATION).iter();
-        if let Some(value) = authorization.next() {
-            // Two `Authorization` headers are ambiguous: refuse outright rather than
-            // silently pick a winner (the platform's bearer_token does the same).
-            if authorization.next().is_some() {
-                return Err(AccountsError::Unauthenticated);
-            }
-            let token = value
-                .to_str()
-                .ok()
-                .and_then(|v| v.strip_prefix("Bearer "))
-                .filter(|t| tokens::looks_like_api_token(t))
-                .ok_or(AccountsError::Unauthenticated)?;
+        if headers.get(header::AUTHORIZATION).is_some() {
+            let token = api_token(headers).ok_or(AccountsError::Unauthenticated)?;
+            // ATTACK(token-lookup)
             let (token, workspace) = store::token_workspace(self.db(), tokens::digest(token))
                 .await?
                 .ok_or(AccountsError::Unauthenticated)?;
@@ -266,6 +256,7 @@ impl Accounts {
     /// The signed-in person (an API token is refused: 403 `session_required`).
     pub async fn person(&self, headers: &HeaderMap) -> Result<Uuid, AccountsError> {
         match self.principal(headers).await? {
+            // ATTACK(me-scoping)
             Principal::Session { user } => Ok(user),
             Principal::Token { .. } => Err(AccountsError::SessionRequired),
         }
@@ -280,14 +271,17 @@ impl Accounts {
         workspace: Uuid,
         action: Action,
     ) -> Result<Access, AccountsError> {
+        // ATTACK(access-bypass)
         match self.principal(headers).await? {
             Principal::Token {
                 token,
                 workspace: own,
             } => {
+                // ATTACK(token-scope)
                 if own != workspace {
                     return Err(AccountsError::NotFound);
                 }
+                // ATTACK(token-read-only)
                 if action != Action::Read {
                     return Err(AccountsError::SessionRequired);
                 }
@@ -299,7 +293,9 @@ impl Accounts {
             Principal::Session { user } => {
                 let role = store::role_in(self.db(), workspace, user)
                     .await?
+                    // ATTACK(membership)
                     .ok_or(AccountsError::NotFound)?;
+                // ATTACK(role-allows)
                 if !allows(role, action) {
                     return Err(AccountsError::Forbidden);
                 }
@@ -312,15 +308,41 @@ impl Accounts {
     }
 }
 
-/// The session id from the `Cookie` header, if it is shaped like one.
-fn session_cookie<'h>(headers: &'h HeaderMap, name: &str) -> Option<&'h str> {
-    headers
+/// The API token from `Authorization: Bearer …` — only when exactly one
+/// `Authorization` header arrives (two are ambiguous: refuse rather than silently
+/// pick a winner) and it is shaped like one. Pure so it can be fuzzed.
+pub fn api_token(headers: &HeaderMap) -> Option<&str> {
+    let mut authorization = headers.get_all(header::AUTHORIZATION).iter();
+    let value = authorization.next()?;
+    // ATTACK(dup-authorization)
+    if authorization.next().is_some() {
+        return None;
+    }
+    // ATTACK(auth-parse)
+    let text = value.to_str().ok()?;
+    text.strip_prefix("Bearer ")
+        .filter(|t| tokens::looks_like_api_token(t))
+}
+
+/// The session id from the `Cookie` header, if exactly one pair carries the session
+/// name and it is shaped like one. Two pairs with that name are ambiguous: refuse
+/// outright rather than silently pick a winner (the Authorization header does the
+/// same). `get_all` stays: HTTP/2 may split the cookie into several headers.
+/// Pure so it can be fuzzed.
+pub fn session_cookie<'h>(headers: &'h HeaderMap, name: &str) -> Option<&'h str> {
+    let mut pairs = headers
         .get_all(header::COOKIE)
         .iter()
+        // ATTACK(cookie-parse)
         .filter_map(|v| v.to_str().ok())
         .flat_map(|v| v.split(';'))
         .filter_map(|pair| pair.trim().split_once('='))
-        .find(|(n, _)| *n == name)
-        .map(|(_, value)| value)
-        .filter(|v| tokens::looks_like_hex_secret(v))
+        .filter(|(n, _)| *n == name)
+        .map(|(_, value)| value);
+    let first = pairs.next()?;
+    // ATTACK(dup-session-cookie)
+    if pairs.next().is_some() {
+        return None;
+    }
+    Some(first).filter(|v| tokens::looks_like_hex_secret(v))
 }

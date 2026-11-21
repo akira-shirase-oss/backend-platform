@@ -22,7 +22,15 @@ usage() { sed -n '2,/^set -euo/p' "$0" | sed '$d' | sed 's/^# \{0,1\}//'; }
 case "${1:-}" in -h|--help) usage; exit 0 ;; esac
 
 port="${STARTER_DEV_PORT:-61450}"
+# Validate before any arithmetic: $((port + 7)) on 'a[$(cmd)]' would run the command.
+case "$port" in ''|*[!0-9]*) echo "error: not a port number: $port" >&2; exit 2 ;; esac
 sink_port=$((port + 7))
+for p in "$port" "$sink_port"; do
+  if ! { [[ $p =~ ^[1-9][0-9]{0,4}$ ]] && (( 10#$p >= 61400 && 10#$p <= 61499 )); }; then
+    echo "error: $p is outside this project's port band 61400-61499 (STARTER_DEV_PORT)" >&2
+    exit 2
+  fi
+done
 dir=target/dev
 db=starter_dev
 base="http://127.0.0.1:$port"

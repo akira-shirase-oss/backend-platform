@@ -1726,11 +1726,13 @@ dependencies = [
  "reqwest",
  "serde",
  "serde_json",
+ "sqlx",
  "starter-accounts",
  "starter-db",
  "starter-http",
  "starter-server",
  "tokio",
+ "tokio-util",
  "uuid",
 ]
 

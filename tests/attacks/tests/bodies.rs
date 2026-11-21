@@ -8,7 +8,7 @@ mod common;
 
 use std::time::Duration;
 
-use common::{TOKEN, authed, config, raw_status, spawn, spawn_with};
+use common::{TOKEN, authed, config, raw, raw_status, spawn, spawn_with};
 use reqwest::Method;
 use serde_json::json;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -137,4 +137,41 @@ async fn malformed_json_and_wrong_content_type_are_4xx_never_5xx() {
     // Method confusion is refused.
     let r = authed(&client, Method::POST, &s.url("/v1/projects/shop")).await;
     assert_eq!(r.status().as_u16(), 405);
+}
+
+/// A head carrying both Content-Length and Transfer-Encoding is ambiguous framing —
+/// request smuggling. Hyper's rule (RFC 9112): Transfer-Encoding wins and
+/// Content-Length is ignored — the disambiguation keeps two readers from
+/// disagreeing about where the body ends. A body that only parses as chunked
+/// proves it (CL: 4 would truncate the frame; a wrong credential masks it, 401
+/// lands before the body is read — so the request carries the real TOKEN).
+#[tokio::test]
+async fn a_head_with_content_length_and_transfer_encoding_reads_chunked() {
+    let s = spawn().await;
+    let body = "{\"databases\":[\"main\"]}";
+    let raw_request = format!(
+        "PUT /v1/projects/shop/desired HTTP/1.1\r\nHost: x\r\nAuthorization: Bearer {TOKEN}\r\nContent-Type: application/json\r\nContent-Length: 4\r\nTransfer-Encoding: chunked\r\n\r\n{:x}\r\n{body}\r\n0\r\n\r\n",
+        body.len()
+    );
+    let reply = raw(&s, raw_request.as_bytes(), Duration::from_secs(5)).await;
+    // The chunked body is what the handler saw: 202. Had Content-Length: 4 won,
+    // the body would have been four bytes of frame bytes — invalid JSON, a 4xx.
+    assert_eq!(
+        raw_status(&reply),
+        202,
+        "the chunked body did not win over the declared Content-Length: {reply:?}"
+    );
+}
+
+/// Two Content-Length headers that disagree is the same ambiguity.
+#[tokio::test]
+async fn conflicting_content_length_headers_are_refused() {
+    let s = spawn().await;
+    let reply = raw(
+        &s,
+        b"POST /v1/projects/x/desired HTTP/1.1\r\nHost: x\r\nAuthorization: Bearer t\r\nContent-Type: application/json\r\nContent-Length: 4\r\nContent-Length: 8000\r\n\r\n{}",
+        Duration::from_secs(5),
+    )
+    .await;
+    assert_eq!(raw_status(&reply), 400, "conflicting CL refused: {reply:?}");
 }

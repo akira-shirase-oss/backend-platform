@@ -41,9 +41,12 @@ impl ClientKey {
     /// a trusted proxy — the right-most `X-Forwarded-For` entry. If that hop does not parse
     /// the client is the peer, never an entry further left.
     pub fn from_request(peer: SocketAddr, headers: &HeaderMap, trusted: &[IpAddr]) -> Self {
+        // ATTACK(xff-trust)
         if trusted.contains(&peer.ip())
             && let Some(last_line) = headers.get_all("x-forwarded-for").iter().next_back()
+            // ATTACK(xff-hop)
             && let Some(hop) = last_line
+                // ATTACK(xff-parse)
                 .to_str()
                 .ok()
                 .and_then(|line| line.rsplit(',').next())

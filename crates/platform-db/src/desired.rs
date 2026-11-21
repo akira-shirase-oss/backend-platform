@@ -41,6 +41,7 @@ pub async fn put_desired(
     // idempotency key won the race, and then finds that write.
     for pass in 0..2 {
         let mut tx = pool.begin().await?;
+        // ATTACK(idempotency-replay)
         if let Some(key) = idempotency_key
             && let Some((id, revision, same)) = sqlx::query_as::<_, (Uuid, i64, bool)>(
                 "SELECT id, revision, desired = $3 FROM operations
@@ -60,6 +61,7 @@ pub async fn put_desired(
                     replayed: true,
                 })
             } else {
+                // ATTACK(idempotency-conflict)
                 Err(AdmitError::IdempotencyConflict)
             };
         }
@@ -195,6 +197,7 @@ pub async fn project_status(
     project: &ProjectId,
 ) -> Result<Option<ProjectStatus>, DbError> {
     let Some((desired_revision, desired)) = sqlx::query_as::<_, (i64, serde_json::Value)>(
+        // ATTACK(project-scope)
         "SELECT revision, spec FROM desired_states WHERE project = $1",
     )
     .bind(project.as_str())

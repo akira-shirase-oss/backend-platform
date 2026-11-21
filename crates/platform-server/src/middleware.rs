@@ -47,6 +47,7 @@ impl MakeRequestId for MakeRequestUuidV7 {
 
 /// True for client ids safe to copy into logs: 1–64 of `[A-Za-z0-9._-]`.
 pub fn is_acceptable_request_id(value: &str) -> bool {
+    // ATTACK(request-id-check)
     (1..=MAX_REQUEST_ID_LEN).contains(&value.len())
         && value
             .bytes()
@@ -153,6 +154,7 @@ pub async fn shed_load(
     request: Request,
     next: Next,
 ) -> Response {
+    // ATTACK(shed-gate)
     let Ok(permit) = gate.try_acquire() else {
         return ApiError::Overloaded.into_response();
     };
@@ -192,12 +194,15 @@ pub fn apply(router: Router, config: &Config) -> Router {
         // 6. Panics become 500 envelopes.
         .layer(CatchPanicLayer::custom(panic_response))
         // 7. Deadline for the response: 503, we were slow, not the client.
+        // ATTACK(request-timeout)
         .layer(TimeoutLayer::with_status_code(
             StatusCode::SERVICE_UNAVAILABLE,
             config.request_timeout,
         ))
         // 8–9. Body limits, by Content-Length up front and while streaming.
+        // ATTACK(body-limit)
         .layer(RequestBodyLimitLayer::new(config.max_body_bytes))
+        // ATTACK(body-limit)
         .layer(DefaultBodyLimit::max(config.max_body_bytes));
     router.layer(stack)
 }

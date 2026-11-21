@@ -91,7 +91,7 @@ impl SignInGate {
 
     /// Step 1: the address's budget.
     pub fn admit(&self, address: ClientKey) -> Result<Attempt, RetryAfter> {
-        self.per_address.take(address)?; // LIMIT(sign-in-per-address)
+        self.per_address.take(address)?; // LIMIT(sign-in-per-address) ATTACK(signin-budget)
         Ok(Attempt {
             address,
             global: false,
@@ -144,7 +144,7 @@ impl MailGate {
     /// Takes one from the address, then one from everyone (the address's comes back if
     /// the global one is spent).
     pub fn admit(&self, address: ClientKey) -> Result<(), RetryAfter> {
-        self.per_address.take(address)?; // LIMIT(mail-per-address)
+        self.per_address.take(address)?; // LIMIT(mail-per-address) ATTACK(mail-budget)
         if let Err(wait) = self.global.take() {
             self.per_address.give_back(address);
             return Err(wait);

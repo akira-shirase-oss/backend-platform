@@ -107,6 +107,7 @@ impl Config {
     /// arbitrary values without mutating the process environment.
     pub fn from_lookup(lookup: impl Fn(&str) -> Option<String>) -> Result<Self, String> {
         let var = |name: &str| lookup(name).filter(|v| !v.is_empty());
+        // ATTACK(config-default)
         let defaults = Self::default();
         let mut errors = Vec::new();
         let database_url = var("BP_DATABASE_URL").unwrap_or_else(|| {
@@ -114,6 +115,7 @@ impl Config {
             String::new()
         });
         let admin_token = var("BP_ADMIN_TOKEN").unwrap_or_default();
+        // ATTACK(admin-token-len)
         if admin_token.len() < MIN_ADMIN_TOKEN_LEN
             || !admin_token.bytes().all(|b| b.is_ascii_graphic())
         {
