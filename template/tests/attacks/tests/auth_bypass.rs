@@ -60,7 +60,6 @@ async fn garbage_sessions_and_tokens_are_refused() {
             .send()
             .await
             .unwrap();
-        // DECISIVE(garbage_sessions_and_tokens_are_refused)
         assert_eq!(r.status().as_u16(), 401, "cookie {cookie:?}");
     }
     for token in ["st_", "st_garbage", "notatoken", "st_ almost right"] {
@@ -81,6 +80,7 @@ async fn garbage_sessions_and_tokens_are_refused() {
         .send()
         .await
         .unwrap();
+    // DECISIVE(garbage_sessions_and_tokens_are_refused)
     assert_eq!(r.status().as_u16(), 401, "unissued shaped token");
 }
 

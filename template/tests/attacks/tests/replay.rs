@@ -393,9 +393,9 @@ async fn every_sign_in_rotates_the_session_id() {
             .send()
             .await
             .unwrap();
+        // DECISIVE(every_sign_in_rotates_the_session_id)
         assert_eq!(r.status().as_u16(), 200);
         let id = common::cookie_value(r.headers(), "starter_session").unwrap();
-        // DECISIVE(every_sign_in_rotates_the_session_id)
         assert!(ids.insert(id), "a session id was issued twice");
     }
 }
