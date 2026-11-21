@@ -76,7 +76,7 @@ mutations=(
   "token-lookup|crates/starter-accounts/src/lib.rs|ok_or\(AccountsError::Unauthenticated\)\?;	unwrap_or((Uuid::nil(), Uuid::nil()));|starter-attacks|auth_bypass|garbage_sessions_and_tokens_are_refused"
   "origin-check|crates/starter-accounts/src/routes.rs|!= Some\(accounts\.settings\(\)\.public_url\.as_str\(\)\)	== Some(accounts.settings().public_url.as_str())|starter-attacks|auth_bypass|cross_origin_cookie_posts_are_refused"
   "origin-check|crates/starter-accounts/src/routes.rs|!= Some\(accounts\.settings\(\)\.public_url\.as_str\(\)\)	== Some(accounts.settings().public_url.as_str())|starter-attacks|auth_bypass|a_product_post_is_csrf_guarded_too"
-  "csrf-v1|crates/starter-server/src/lib.rs|let router = router\.layer\(csrf\);	let _ = router.layer(csrf);|starter-attacks|auth_bypass|a_product_post_is_csrf_guarded_too"
+  "csrf-v1|crates/starter-server/src/lib.rs|let router = router\.layer\(csrf\);	let _ = router.clone().layer(csrf);|starter-attacks|auth_bypass|a_product_post_is_csrf_guarded_too"
   # --- bodies ---
   "body-limit|crates/starter-http/src/stack.rs|limits\.max_body_bytes	usize::MAX|starter-attacks|bodies|a_body_past_the_limit_is_413_whether_declared_or_streamed"
   "request-timeout|crates/starter-http/src/stack.rs|limits\.request_timeout,	Duration::from_secs(3600),|starter-attacks|bodies|a_slow_dribbled_body_times_out_and_the_server_stays_up"
