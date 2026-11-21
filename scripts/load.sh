@@ -67,6 +67,14 @@ summary="$(mktemp)"
 token="load-$(od -An -N24 -tx1 /dev/urandom | tr -d ' \n')"
 
 load_before="$(uptime | sed 's/.*load averages*: *//')"
+# A port that already listens belongs to another process — k6 would load-test
+# that stranger. Refuse before launching anything (a connect probe: HTTP or not).
+for p in "$fake_port" "$server_port"; do
+  if (exec 3<>"/dev/tcp/127.0.0.1/$p") 2>/dev/null; then
+    echo "error: 127.0.0.1:$p already has a listener - held by another process" >&2
+    exit 1
+  fi
+done
 BP_FAKE_LISTEN="127.0.0.1:${fake_port}" BP_FAKE_RANDOM_PER_MILLION=1000 BP_FAKE_RANDOM_SEED=20261116 BP_FAKE_HANG_MS=3000 \
   ./target/release/fake-provider >"target/perf/fake-${stamp}.log" 2>&1 &
 fake=$!
@@ -79,10 +87,24 @@ cleanup() {
 }
 trap cleanup EXIT
 for _ in $(seq 1 100); do
+  # The liveness check comes first: a dead child can mean the port was already
+  # another product's, whose /readyz would keep answering.
+  kill -0 "$server" 2>/dev/null || {
+    echo "error: the server died before becoming ready; its log follows" >&2
+    tail -20 "target/perf/server-${stamp}.log" >&2
+    exit 1
+  }
   curl -fsS "http://127.0.0.1:${server_port}/readyz" >/dev/null 2>&1 && break
   sleep 0.1
 done
 curl -fsS "http://127.0.0.1:${server_port}/readyz" >/dev/null
+if command -v lsof >/dev/null 2>&1; then
+  listener="$(lsof -nP -tiTCP:"$server_port" -sTCP:LISTEN | head -1 || true)"
+  [ "$listener" = "$server" ] || {
+    echo "error: port $server_port is held by pid ${listener:-?}, not our server $server" >&2
+    exit 1
+  }
+fi
 BP_DATABASE_URL="$db_url" BP_PROVIDER_URL="http://127.0.0.1:${fake_port}" BP_WORKER_CONCURRENCY=32 \
   BP_CALL_TIMEOUT_MS=1000 BP_LEASE_MS=20000 BP_LOG=warn \
   ./target/release/platform-worker >"target/perf/worker-${stamp}.log" 2>&1 &

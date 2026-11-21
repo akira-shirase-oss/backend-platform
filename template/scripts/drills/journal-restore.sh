@@ -53,25 +53,39 @@ cleanup() {
   rm -rf "$DRILL_WORK"
 }
 trap cleanup EXIT
-# healthy PORT PID: poll /health while the child stays alive — a dead child can mean
-# the port was already someone else's, whose /health would keep answering.
+# healthy PORT PID: the liveness check comes BEFORE /health — a dead child can
+# mean the port was already someone else's, whose /health would keep answering.
 healthy() {
   for _ in $(seq 1 120); do
-    curl -sf "http://127.0.0.1:$1/health" >/dev/null 2>&1 && return 0
     kill -0 "$2" 2>/dev/null || return 1
+    curl -sf "http://127.0.0.1:$1/health" >/dev/null 2>&1 && return 0
     sleep 0.25
   done
   return 1
 }
 
 start() {
+  # A port that already listens belongs to another process; the drill would talk
+  # to that stranger. Refuse before launching (a connect probe, not HTTP).
+  for p in "$port" "$hport"; do
+    if (exec 3<>"/dev/tcp/127.0.0.1/$p") 2>/dev/null; then
+      echo "error: 127.0.0.1:$p already has a listener - held by another process" >&2
+      return 1
+    fi
+  done
   python3 -I "$handler" "$hport" >"$DRILL_WORK/handler.log" 2>&1 &
   pids+=($!)
   "$server" --journal "$DRILL_WORK/journal" --listen "127.0.0.1:$port" --backup-root "$DRILL_WORK/backups" \
     --handler "step=http://127.0.0.1:$hport/step" >"$DRILL_WORK/server.log" 2>&1 &
   server_pid=$!
   pids+=($server_pid)
-  healthy "$port" "$server_pid"
+  healthy "$port" "$server_pid" || return 1
+  if command -v lsof >/dev/null 2>&1; then
+    [ "$(lsof -nP -tiTCP:"$port" -sTCP:LISTEN | head -1 || true)" = "$server_pid" ] || {
+      echo "error: port $port is not held by our server $server_pid" >&2
+      return 1
+    }
+  fi
 }
 step "start a server on a fresh journal, with a backup root" start
 

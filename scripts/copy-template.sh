@@ -8,9 +8,11 @@
 #
 # NAME is 2-16 lower-case letters and digits, starting with a letter (`durable`, `smon`).
 # BAND is the product's own port band, <low>-<high> above 60999, written to the copy's
-# scripts/port-band and reserved in this repository's port-bands registry: a band that
-# overlaps a registered one — the platform's own included — is refused, so two copies
-# can never bind the same ports on one machine. It renames the crates (starter-http ->
+# scripts/port-band and reserved in this repository's port-bands registry under a lock
+# before the copy is made: a band that overlaps a registered one — the platform's own
+# included — is refused, so two copies can never bind the same ports on one machine.
+# The copy is git archive'd at HEAD, the exact commit TEMPLATE_ORIGIN records; an
+# uncommitted template edit is noted and not copied. It renames the crates (starter-http ->
 # NAME-http, ...), the operator tool (NAME-ctl -> NAMEctl), the variables (STARTER_ ->
 # NAME_), the database roles, the unit, the paths and the compose project. --verify then
 # builds and tests the copy (its own target directory under the copy; needs
@@ -34,15 +36,41 @@ if (( 10#$band_low <= 60999 || 10#$band_low > 10#$band_high || 10#$band_high > 6
   exit 2
 fi
 # The band registry reserves one contiguous band per product. PORT_BANDS_FILE
-# overrides the registry path (tests point it at a scratch file).
+# overrides the registry path (tests point it at a scratch file). The check and
+# the append happen under one lock and BEFORE the copy: an overlap refused only
+# at the end would reserve nothing while the copy still shipped a taken band.
 registry="${PORT_BANDS_FILE:-port-bands}"
 [ -f "$registry" ] || { echo "error: no port-band registry at $registry" >&2; exit 2; }
 if [ "$band" = "61400-61499" ]; then
   echo "error: 61400-61499 is the platform's own band; a copy needs its own" >&2
   exit 2
 fi
-while IFS=' ' read -r owner reserved _; do
-  case "$owner" in ''|'#'*) continue ;; esac
+lockdir="$registry.lock.d"
+for _ in $(seq 1 50); do
+  if mkdir "$lockdir" 2>/dev/null; then break; fi
+  holder="$(cat "$lockdir/pid" 2>/dev/null || true)"
+  if [ -n "$holder" ] && ! kill -0 "$holder" 2>/dev/null; then rm -rf "$lockdir"; continue; fi
+  sleep 0.1
+done
+[ -d "$lockdir" ] || {
+  echo "error: $registry stayed locked (held by pid ${holder:-?}); remove $lockdir if stale" >&2
+  exit 1
+}
+printf '%s\n' "$$" >"$lockdir/pid"
+trap 'rm -rf "$lockdir"' EXIT
+lineno=0
+while IFS= read -r line || [ -n "$line" ]; do
+  lineno=$((lineno + 1))
+  case "$line" in ''|'#'*) continue ;; esac
+  # Every reservation line must be exactly "<name> <low>-<high>" in ASCII. A
+  # CRLF or an en dash reads as malformed here — refusing is the only way the
+  # file cannot silently reserve nothing.
+  if [[ ! "$line" =~ ^[a-z][a-z0-9-]{0,30}[[:space:]][0-9]{2,5}-[0-9]{2,5}$ ]]; then
+    echo "error: $registry:$lineno is malformed (want '<name> <low>-<high>', ASCII, LF): '$line'" >&2
+    exit 1
+  fi
+  owner="${line%% *}"
+  reserved="${line##* }"
   if [ "$owner" = "$name" ]; then
     echo "error: $registry already reserves a band for $name" >&2
     exit 2
@@ -53,12 +81,21 @@ while IFS=' ' read -r owner reserved _; do
     exit 2
   fi
 done < "$registry"
+printf '%s %s\n' "$name" "$band" >>"$registry"
+rm -rf "$lockdir"
+trap - EXIT
 if [ -e "$dest" ] && [ -n "$(ls -A "$dest" 2>/dev/null)" ]; then
   echo "error: $dest exists and is not empty" >&2
   exit 2
 fi
 [ -e "$dest" ] || mkdir -p "$dest"
-(cd template && tar --exclude ./target -cf - .) | tar -xf - -C "$dest"
+# The copy is exactly the commit TEMPLATE_ORIGIN records: uncommitted template
+# edits never reach it (and would make the recorded commit a lie).
+commit="$(git rev-parse HEAD)"
+if [ -n "$(git status --porcelain -- template)" ]; then
+  echo "note: template/ has uncommitted changes; the copy takes $commit only" >&2
+fi
+git archive "$commit" template | tar -x --strip-components=1 -C "$dest"
 
 python3 -I - "$dest" "$name" <<'PY'
 import os, re, sys
@@ -133,7 +170,6 @@ if left:
 print(f"renamed for {name}: {changed} files rewritten")
 PY
 
-commit="$(git rev-parse HEAD)"
 cat >"$dest/TEMPLATE_ORIGIN" <<EOF
 # Where this copy came from. Pull later template changes as a reviewed diff
 # (docs/COPYING.md, "Pulling template changes"):
@@ -144,9 +180,9 @@ copied: $(date -u +%Y-%m-%d)
 name: $name
 port-band: $band
 EOF
-# The copy's band is its own, recorded in its check's source and reserved here.
+# The copy's band is its own, recorded in its check's source; the reservation
+# itself was appended above, before copying.
 printf '%s\n' "$band" >"$dest/scripts/port-band"
-printf '%s %s\n' "$name" "$band" >>"$registry"
 echo "copied template/ at $commit to $dest as $name (band $band reserved in $registry)"
 
 # The rename changes crate-name lengths, which rustfmt and Clippy see: format the copy so

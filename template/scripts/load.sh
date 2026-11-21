@@ -70,23 +70,39 @@ ctl "$db" bootstrap >/dev/null
 ctl "$db" migrate >/dev/null
 target/release/examples/smtp-sink "127.0.0.1:$sink_port" "$work/mail.log" >"$work/sink.log" 2>&1 &
 pids+=($!)
+# A port that already listens belongs to another product — k6 would load-test
+# that stranger. Refuse before launching anything (a connect probe, not HTTP).
+for p in "$port" "$sink_port"; do
+  if (exec 3<>"/dev/tcp/127.0.0.1/$p") 2>/dev/null; then
+    echo "error: 127.0.0.1:$p already has a listener - held by another process" >&2
+    exit 1
+  fi
+done
 STARTER_DATABASE_URL="$(role_url starter_app "$APP_PW" "$db")" STARTER_LISTEN="127.0.0.1:$port" \
   STARTER_SMTP_RELAY="127.0.0.1:$sink_port" STARTER_PUBLIC_URL="$base" STARTER_COOKIE_SECURE=false \
   STARTER_LOG=warn STARTER_MAX_IN_FLIGHT="${MAX_IN_FLIGHT:-256}" target/release/starter-server >"$work/server.log" 2>&1 &
 server=$!
 pids+=($server)
 for _ in $(seq 1 120); do
-  curl -fsS -o /dev/null "$base/readyz" 2>/dev/null && break
-  # If the child died — the port was already another product's, say — readyz
-  # would keep answering from THAT product and k6 would load-test a stranger.
+  # The liveness check comes BEFORE readyz: a dead child can mean the port was
+  # already another product's, whose /readyz would keep answering — and k6
+  # would load-test that stranger.
   kill -0 "$server" 2>/dev/null || {
     echo "error: the server died before becoming ready; its log follows" >&2
     tail -20 "$work/server.log" >&2
     exit 1
   }
+  curl -fsS -o /dev/null "$base/readyz" 2>/dev/null && break
   sleep 0.25
 done
 curl -fsS -o /dev/null "$base/readyz"
+if command -v lsof >/dev/null 2>&1; then
+  listener="$(lsof -nP -tiTCP:"$port" -sTCP:LISTEN | head -1 || true)"
+  [ "$listener" = "$server" ] || {
+    echo "error: port $port is held by pid ${listener:-?}, not our server $server" >&2
+    exit 1
+  }
+fi
 
 api() { curl -sS --max-time 10 -X "$1" -b "$work/cookies" -c "$work/cookies" -H 'content-type: application/json' ${3:+--data "$3"} "$base$2"; }
 invite="$(ctl "$db" invite 1 1)"

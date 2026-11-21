@@ -104,16 +104,30 @@ sink() {
 step "start a fake SMTP sink" sink
 
 serve() { # log -> starts $prefix/current, waits for /readyz
+  # A port that already listens belongs to another process — or the previous
+  # release still stopping — and the rehearsal would talk to that stranger.
+  if (exec 3<>"/dev/tcp/127.0.0.1/$port") 2>/dev/null; then
+    echo "error: 127.0.0.1:$port already has a listener - held by another process" >&2
+    return 1
+  fi
   STARTER_LISTEN="127.0.0.1:$port" STARTER_SMTP_RELAY="127.0.0.1:$sink_port" STARTER_PUBLIC_URL="$base" \
     STARTER_COOKIE_SECURE=false STARTER_LOG_FORMAT=json "$prefix/current/bin/starter-server" >"$DRILL_WORK/$1" 2>&1 &
   server_pid=$!
   pids+=($server_pid)
   for _ in $(seq 1 120); do
-    curl -fsS -o /dev/null "$base/readyz" 2>/dev/null && return 0
+    # The liveness check comes BEFORE /readyz: a dead child can mean the port
+    # was already another product's, whose readyz would keep answering.
     kill -0 "$server_pid" 2>/dev/null || return 1
+    curl -fsS -o /dev/null "$base/readyz" 2>/dev/null && break
     sleep 0.25
   done
-  return 1
+  curl -fsS -o /dev/null "$base/readyz" >/dev/null 2>&1 || return 1
+  if command -v lsof >/dev/null 2>&1; then
+    [ "$(lsof -nP -tiTCP:"$port" -sTCP:LISTEN | head -1 || true)" = "$server_pid" ] || {
+      echo "error: port $port is not held by our server $server_pid" >&2
+      return 1
+    }
+  fi
 }
 stop() { kill -TERM "$server_pid" && wait "$server_pid"; }
 api() { # method path [body] (cookie jar and JSON)

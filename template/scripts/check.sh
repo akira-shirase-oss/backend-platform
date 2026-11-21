@@ -67,11 +67,27 @@ rm -f "$sample"
 
 # The copy's port band: every port it binds stays inside it (docs/COPYING.md). A copy
 # must leave the template's default band — it is the platform's own, so two copies on
-# one machine would otherwise share it. TEMPLATE_ORIGIN exists only in a copy, which
-# is how this same check lets the template itself keep the default.
-if [ -f TEMPLATE_ORIGIN ] && [ "$(cat scripts/port-band)" = "61400-61499" ]; then
-  echo "error: a copy must set its own band in scripts/port-band; 61400-61499 is the platform's (docs/COPYING.md)" >&2
-  exit 2
+# one machine would otherwise share it; any OVERLAP with 61400-61499 is refused, not
+# just the exact band. TEMPLATE_ORIGIN exists only in a copy — its port-band is the
+# band the copier reserved, and scripts/port-band must still match it.
+if [ -f TEMPLATE_ORIGIN ]; then
+  origin_band="$(sed -n 's/^port-band:[[:space:]]*//p' TEMPLATE_ORIGIN | head -1)"
+  copy_band="$(cat scripts/port-band)"
+  for b in "$origin_band" "$copy_band"; do
+    [[ "$b" =~ ^[0-9]{2,5}-[0-9]{2,5}$ ]] || {
+      echo "error: band '$b' is not <low>-<high> (TEMPLATE_ORIGIN vs scripts/port-band)" >&2
+      exit 2
+    }
+  done
+  [ "$copy_band" = "$origin_band" ] || {
+    echo "error: scripts/port-band is $copy_band but TEMPLATE_ORIGIN reserved $origin_band" >&2
+    exit 2
+  }
+  band_low="${copy_band%%-*}" band_high="${copy_band##*-}"
+  if (( 10#$band_low <= 61499 && 10#$band_high >= 61400 )); then
+    echo "error: band $copy_band overlaps the platform's own 61400-61499 (docs/COPYING.md)" >&2
+    exit 2
+  fi
 fi
 # The out-of-band probes reach the sample file through printf %s, so this script itself
 # holds no offending literal for the check to flag.

@@ -41,5 +41,31 @@ for name in ab abcdefghijklmnop; do
   fi
   echo "name ok at length ${#name}: fmt --check, clippy and the leftover grep clean ($name)"
 done
+
+# Every reservation the registry promises must actually refuse — each fixture
+# below must fail the copy, not slip through and ship a taken band.
+grep -q '^ab 62000-62099$' "$PORT_BANDS_FILE" || {
+  echo "error: the successful copy did not record its band in the registry" >&2
+  exit 1
+}
+refused() { # label dest name band
+  local label=$1 dest=$2 name=$3 band=$4
+  if scripts/copy-template.sh "$dest" "$name" "$band" >"$work/out" 2>&1; then
+    echo "error: copy-template did not refuse $label ($name $band):" >&2
+    cat "$work/out" >&2
+    exit 1
+  fi
+  echo "refused: $label"
+}
+printf 'zz 61700-61799\n' >>"$PORT_BANDS_FILE"
+refused "an overlapping band" "$work/o1" yy 61750-61850
+refused "a duplicate product name" "$work/o2" zz 61900-61999
+refused "the platform's own band" "$work/o3" yy 61400-61499
+refused "a band at the ephemeral boundary" "$work/o4" yy 60900-60999
+refused "a band above 65535" "$work/o5" yy 65500-65600
+printf 'crlf 61500-61599\r\n' >>"$PORT_BANDS_FILE"
+refused "a CRLF registry line" "$work/o6" yy 61600-61699
+printf 'backend-platform 61400-61499\ndash-owner 61500\342\200\22361599\n' >"$PORT_BANDS_FILE"
+refused "an en dash registry line" "$work/o7" yy 61600-61699
 rm -rf "$work"
 echo "copy-names ok: the template is fmt- and clippy-clean at NAME lengths 2 and 16"

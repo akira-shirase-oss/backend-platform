@@ -1,5 +1,16 @@
 # <product> <low>-<high> — one contiguous port band per product on this machine,
 # every band above Linux's ephemeral range (which ends at 60999). A copy of the
 # starter template reserves its band here: scripts/copy-template.sh refuses a
-# band that overlaps an entry and appends the new product's reservation itself.
+# band that overlaps an entry and appends the new product's reservation itself,
+# under a lock. Entries cover this machine's other projects too, so a copy can
+# never take a band another product already holds. Lines are exactly
+# "<name> <low>-<high>" in ASCII — a malformed line refuses the copy.
 backend-platform 61400-61499
+accounting-reconciliation 62400-62499
+defi-yield-agent 63000-63099
+prediction-market 63100-63199
+rwa-private-credit 63200-63299
+x402-agent-payments 63300-63399
+content-repurposing 63400-63499
+scheduling-deposits 63500-63599
+meeting-notes-crm 63600-63699
