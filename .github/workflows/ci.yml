@@ -67,17 +67,21 @@ jobs:
         run: |
           scripts/check-pins.sh
           printf 'services:\n  db:\n    image: postgres:18\n' > "$RUNNER_TEMP/unpinned-image.yaml"
-          ! scripts/check-pins.sh "$RUNNER_TEMP/unpinned-image.yaml"
+          status=0; scripts/check-pins.sh "$RUNNER_TEMP/unpinned-image.yaml" || status=$?
+          [ "$status" -eq 1 ]
           printf 'steps:\n  - uses: actions/checkout@v7\n' > "$RUNNER_TEMP/unpinned-action.yaml"
-          ! scripts/check-pins.sh "$RUNNER_TEMP/unpinned-action.yaml"
+          status=0; scripts/check-pins.sh "$RUNNER_TEMP/unpinned-action.yaml" || status=$?
+          [ "$status" -eq 1 ]
       - name: Ports stay in the band 61400-61499, and the check can fail
         run: |
           scripts/check-ports.sh
           # The offending value reaches the sample files through %s, so this workflow holds none.
           printf 'ports:\n      - "%s:8000"\n' 58000 > "$RUNNER_TEMP/outofband-mapping.yaml"
-          ! scripts/check-ports.sh "$RUNNER_TEMP/outofband-mapping.yaml"
+          status=0; scripts/check-ports.sh "$RUNNER_TEMP/outofband-mapping.yaml" || status=$?
+          [ "$status" -eq 1 ]
           printf 'curl http://127.0.0.1:%s/health\n' 8080 > "$RUNNER_TEMP/outofband-literal.txt"
-          ! scripts/check-ports.sh "$RUNNER_TEMP/outofband-literal.txt"
+          status=0; scripts/check-ports.sh "$RUNNER_TEMP/outofband-literal.txt" || status=$?
+          [ "$status" -eq 1 ]
       - name: Tests, including drill partial-provision over 10,000 in-process fault schedules
         run: cargo test --workspace --locked
       - name: Drill partial-provision, process level (the real worker killed with SIGKILL)

@@ -335,6 +335,7 @@ const OPERATION_COLUMNS: &str = "id, project, revision, round, state, created_at
 
 /// One operation with its steps and derived status, in one round trip.
 pub async fn get(pool: &PgPool, id: OperationId) -> Result<Option<OperationSummary>, DbError> {
+    // ATTACK(operation-lookup)
     let rows = sqlx::query_as::<_, OperationStepRow>(sqlx::AssertSqlSafe(format!(
         "SELECT o.id AS op_id, o.project AS op_project, o.revision AS op_revision,
                 o.round AS op_round, o.state AS op_state, o.created_at AS op_created_at,

@@ -90,8 +90,8 @@ fn apply(target: &str, bytes: &[u8]) {
             let _ = domain::check_password(&text);
         }
         "config" => {
-            // Real variable names with generated values — a parser is only exercised
-            // when the key is one it reads. Byte 0 picks the variable.
+            // The same generated text reaches every variable — a parser is only
+            // exercised when the name is one it reads.
             let mut map = BTreeMap::new();
             for var in CONFIG_VARS {
                 map.insert((*var).to_owned(), text.to_string());
@@ -233,6 +233,9 @@ fn config_refuses_garbage_values_and_names_the_variable() {
     for (var, bad) in [
         ("STARTER_PUBLIC_URL", "gopher://example.test"),
         ("STARTER_PUBLIC_URL", "http://8.8.8.8"),
+        ("STARTER_PUBLIC_URL", "http://evil.example?@127.0.0.1"),
+        ("STARTER_PUBLIC_URL", "http://user:pw@127.0.0.1"),
+        ("STARTER_PUBLIC_URL", "http://127.0.0.1:61450/x"),
         ("STARTER_LISTEN", "not-an-addr"),
         ("STARTER_MAX_BODY_BYTES", "notanumber"),
         ("STARTER_COOKIE_SECURE", "maybe"),

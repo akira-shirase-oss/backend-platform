@@ -209,6 +209,45 @@ impl Source for BTreeMap<&str, &str> {
     }
 }
 
+/// Exactly `scheme://host[:port]` (`scheme` is `http` or `https`), or None.
+/// The host may be a name, an IPv4 literal or a `[bracketed]` IPv6 literal;
+/// userinfo, a path, a query or a fragment are refused — see the
+/// `STARTER_PUBLIC_URL` check for why either is dangerous.
+fn origin_host_port(url: &str) -> Option<(String, Option<u16>)> {
+    let rest = url
+        .strip_prefix("https://")
+        .or_else(|| url.strip_prefix("http://"))?;
+    if rest.is_empty()
+        || rest
+            .bytes()
+            .any(|b| matches!(b, b'/' | b'?' | b'#' | b'@' | b'\\'))
+        || rest.chars().any(char::is_whitespace)
+    {
+        return None;
+    }
+    let (host, port) = match rest.strip_prefix('[') {
+        Some(inner) => {
+            let (v6, tail) = inner.split_once(']')?;
+            match tail {
+                "" => (v6, None),
+                _ => (v6, Some(tail.strip_prefix(':')?)),
+            }
+        }
+        None => match rest.rsplit_once(':') {
+            Some((h, p)) if !h.contains(':') => (h, Some(p)),
+            Some(_) => return None,
+            None => (rest, None),
+        },
+    };
+    if host.is_empty() {
+        return None;
+    }
+    match port {
+        None => Some((host.to_owned(), None)),
+        Some(p) => Some((host.to_owned(), Some(p.parse::<u16>().ok()?))),
+    }
+}
+
 fn default_of(name: &str) -> &'static str {
     VARIABLES
         .iter()
@@ -228,7 +267,7 @@ impl Problems {
     ) -> T {
         let raw = source
             .var(name)
-            // ATTACK(config-default)
+            // ATTACK(config-parse)
             .unwrap_or_else(|| default_of(name).to_owned());
         match raw.parse::<T>() {
             Ok(v) if range.contains(&v) => v,
@@ -385,34 +424,31 @@ impl Config {
         let public_url = source
             .var("STARTER_PUBLIC_URL")
             .unwrap_or_else(|| default_of("STARTER_PUBLIC_URL").to_owned());
-        if !(public_url.starts_with("https://") || public_url.starts_with("http://"))
-            || public_url.ends_with('/')
-            || public_url.chars().any(char::is_whitespace)
-        {
-            p.0.push(
-                "STARTER_PUBLIC_URL must be an http(s) origin without a trailing slash".to_owned(),
-            );
-        } else if let Some(rest) = public_url.strip_prefix("http://") {
-            // Plain http is development-only: a non-loopback origin leaks links, cookies
-            // and tokens — refuse it unless the host is loopback.
-            let authority = rest.split('/').next().unwrap_or("");
-            let authority = authority.rsplit('@').next().unwrap_or("");
-            let host = match authority.strip_prefix('[') {
-                Some(inner) => inner.split(']').next().unwrap_or(""),
-                None => authority.split(':').next().unwrap_or(""),
-            };
-            let loopback = host == "localhost"
-                || host == "::1"
-                || host
-                    .parse::<std::net::Ipv4Addr>()
-                    .is_ok_and(|ip| ip.is_loopback());
-            // ATTACK(public-url-loopback)
-            if !loopback {
-                p.0.push(
-                    "STARTER_PUBLIC_URL must be https unless it points at a loopback host"
-                        .to_owned(),
-                );
+        match origin_host_port(&public_url) {
+            // Exactly scheme://host[:port]: userinfo, a path, a query or a
+            // fragment either sneak a fake host past the loopback check
+            // (http://evil?@127.0.0.1) or make routes.rs' Origin comparison
+            // refuse every legitimate cookie POST.
+            None => p.0.push(
+                "STARTER_PUBLIC_URL must be exactly an origin: http(s)://host[:port]".to_owned(),
+            ),
+            Some((host, _)) if public_url.starts_with("http://") => {
+                // Plain http is development-only: a non-loopback origin leaks
+                // links, cookies and tokens — refuse it unless the host is loopback.
+                let loopback = host == "localhost"
+                    || host == "::1"
+                    || host
+                        .parse::<std::net::Ipv4Addr>()
+                        .is_ok_and(|ip| ip.is_loopback());
+                // ATTACK(public-url-loopback)
+                if !loopback {
+                    p.0.push(
+                        "STARTER_PUBLIC_URL must be https unless it points at a loopback host"
+                            .to_owned(),
+                    );
+                }
             }
+            Some(_) => {}
         }
         let mail_from = source
             .var("STARTER_MAIL_FROM")

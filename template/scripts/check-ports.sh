@@ -15,7 +15,7 @@ case "${1:-}" in -h|--help) sed -n '2,/^set -euo/p' "$0" | sed '$d' | sed 's/^# 
 case "${1:-}" in -*) echo "check-ports.sh: unknown argument $1 (see --help)" >&2; exit 2 ;; esac
 cd "$(dirname "$0")/.."
 
-band="${PORT_BAND:=61400-61499}"
+band="${PORT_BAND:-$(cat scripts/port-band)}"
 [[ "$band" =~ ^[0-9]{2,5}-[0-9]{2,5}$ ]] || { echo "check-ports.sh: PORT_BAND must be <low>-<high>, got '$band'" >&2; exit 2; }
 band_low="${band%%-*}" band_high="${band##*-}"
 # A band must be non-empty and above Linux's ephemeral range (which ends at 60999);
@@ -43,7 +43,13 @@ report() {
 
 scanned=0
 for file in "${files[@]}"; do
-  [ -f "$file" ] || continue
+  if [ ! -f "$file" ]; then
+    if (( $# )); then
+      echo "error: check-ports.sh: no such file: $file" >&2
+      exit 2
+    fi
+    continue
+  fi
   scanned=$((scanned + 1))
 
   # HOST:NNNN literals (two digits or more; :0 is ephemeral) — loopback, a wildcard
@@ -52,7 +58,7 @@ for file in "${files[@]}"; do
     [ -n "$hit" ] || continue
     line="${hit%%:*}" port="${hit##*:}"
     in_band "$port" || report "$line" "$port" "$(sed -n "${line}p" "$file")"
-  done < <(grep -nEo '(127\.0\.0\.1|localhost|0\.0\.0\.0|\[::\]):[0-9]{2,5}' "$file" || true)
+  done < <(grep -nEo '(127\.0\.0\.1|localhost|0\.0\.0\.0|\[::1?\]):[0-9]{2,5}' "$file" || true)
 
   # A port mapping: - "NNNN:MMMM" — the host side. No end anchor, so a trailing comment
   # or a flow-sequence comma can't hide it; a host-prefixed three-part mapping is caught
@@ -62,6 +68,14 @@ for file in "${files[@]}"; do
     port="$(sed -n "${line}p" "$file" | sed -nE 's/^[[:space:]]*-[[:space:]]*"?([0-9]{2,5}):.*/\1/p')"
     in_band "$port" || report "$line" "$port" "$(sed -n "${line}p" "$file")"
   done < <(grep -nE '^[[:space:]]*-[[:space:]]*"?[0-9]{2,5}:[0-9]+' "$file" | cut -d: -f1 || true)
+
+  # An unquoted mapping in flow form: `ports: [NNNN:MMMM, ...]`.
+  while IFS= read -r hit; do
+    [ -n "$hit" ] || continue
+    line="${hit%%:*}" port="${hit#*:[}"
+    port="${port%%:*}"
+    in_band "$port" || report "$line" "$port" "$(sed -n "${line}p" "$file")"
+  done < <(grep -nEo '\[[0-9]{2,5}:[0-9]+\]' "$file" || true)
 
   # A quoted mapping anywhere — the flow form `ports: ["NNNN:MMMM", ...]`.
   while IFS= read -r hit; do

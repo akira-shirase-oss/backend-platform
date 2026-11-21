@@ -91,12 +91,14 @@ pub enum Action {
     ManageTokens,
     /// Delete the workspace.
     Delete,
+    /// The product's own writes under the workspace — any member; API tokens never.
+    Write,
 }
 
 /// The policy table: which role may do what.
 pub const fn allows(role: Role, action: Action) -> bool {
     match action {
-        Action::Read | Action::ListMembers => true,
+        Action::Read | Action::ListMembers | Action::Write => true,
         Action::ManageMembers | Action::ManageTokens => matches!(role, Role::Owner | Role::Admin),
         Action::ManageOwners | Action::Delete => matches!(role, Role::Owner),
     }

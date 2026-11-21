@@ -44,9 +44,10 @@ case "${1:-}" in
     "${compose[@]}" down --volumes
     ;;
   env)
-    echo "export BP_TEST_DATABASE_URL=$admin"
-    echo "export BP_MIGRATION_DATABASE_URL=$owner"
-    echo "export BP_DATABASE_URL=$runtime"
+    # eval'd by callers: %q so no value can run shell.
+    printf 'export BP_TEST_DATABASE_URL=%q\n' "$admin"
+    printf 'export BP_MIGRATION_DATABASE_URL=%q\n' "$owner"
+    printf 'export BP_DATABASE_URL=%q\n' "$runtime"
     ;;
   *)
     echo "usage: scripts/stack.sh up|down|reset|env" >&2

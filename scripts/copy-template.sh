@@ -67,9 +67,12 @@ for root, dirs, files in os.walk(dest):
         try:
             text = open(path, encoding="utf-8").read()
         except UnicodeDecodeError:
-            # Non-UTF-8 inputs (fuzz corpora) can still carry a template name:
-            # decode byte-exact so the same rules can rewrite it, then write the
-            # bytes back losslessly.
+            # Only the fuzz corpus may hold non-UTF-8 bytes carrying a template
+            # name; anywhere else a non-text fixture is left alone and the
+            # leftover-name check below reports it rather than risk a rewrite
+            # in an encoding surrogateescape cannot represent.
+            if "/tests/attacks/fuzz/corpus/" not in path:
+                continue
             raw = open(path, "rb").read()
             text = raw.decode("utf-8", errors="surrogateescape")
             new = text
@@ -132,7 +135,9 @@ if [ "$verify" = --verify ]; then
     cargo test --workspace --locked -q 2>&1 | grep -E 'test result|FAILED|panicked' || true
     cargo test --workspace --locked -q >/dev/null 2>&1
   )
-  left="$(grep -rIn --exclude-dir=target -E '(^|[^A-Za-z0-9])starter[-_]|(^|[^A-Z0-9])STARTER_|starterctl|(id|nologin|--service|is-active|-u|--value|stop|enable) starter\b' "$dest" | grep -v TEMPLATE_ORIGIN || true)"
+  # -a and LC_ALL=C: GNU grep skips lines it cannot decode, which is exactly
+  # where a non-UTF-8 leftover (a fuzz corpus seed) would hide.
+  left="$(LC_ALL=C grep -rIna --exclude-dir=target -E '(^|[^A-Za-z0-9])starter[-_]|(^|[^A-Z0-9])STARTER_|starterctl|(id|nologin|--service|is-active|-u|--value|stop|enable) starter\b' "$dest" | grep -v TEMPLATE_ORIGIN || true)"
   if [ -n "$left" ]; then
     echo "error: names the rename missed:" >&2
     echo "$left" >&2

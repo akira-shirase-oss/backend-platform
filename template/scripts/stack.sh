@@ -15,7 +15,14 @@ case "${1:-}" in -h|--help) sed -n '2,/^set -euo/p' "$0" | sed '$d' | sed 's/^# 
 cd "$(dirname "$0")/.."
 
 compose=(docker compose -f deploy/compose.yaml)
+# The band lives in one file (COPYING.md); validate before the port reaches a URL.
+band="$(cat scripts/port-band)"
+[[ "$band" =~ ^[1-9][0-9]{1,4}-[1-9][0-9]{1,4}$ ]] || { echo "stack: scripts/port-band must be <low>-<high>, got '$band'" >&2; exit 2; }
 port="${STARTER_PG_PORT:-61433}"
+if ! { [[ $port =~ ^[1-9][0-9]{0,4}$ ]] && (( 10#$port >= 10#${band%%-*} && 10#$port <= 10#${band##*-} )); }; then
+  echo "stack: STARTER_PG_PORT $port is outside this project's port band $band" >&2
+  exit 2
+fi
 
 case "${1:-}" in
   up)
@@ -30,12 +37,13 @@ case "${1:-}" in
   down) "${compose[@]}" down ;;
   reset) "${compose[@]}" down --volumes ;;
   env)
+    # eval'd by callers: %q so a URL query or container id cannot run shell.
     if [ -n "${STARTER_TEST_DATABASE_URL:-}" ]; then
-      echo "export STARTER_TEST_DATABASE_URL=$STARTER_TEST_DATABASE_URL"
-      echo "export STARTER_PG_CONTAINER=${STARTER_PG_CONTAINER:-}"
+      printf 'export STARTER_TEST_DATABASE_URL=%q\n' "$STARTER_TEST_DATABASE_URL"
+      printf 'export STARTER_PG_CONTAINER=%q\n' "${STARTER_PG_CONTAINER:-}"
     else
-      echo "export STARTER_TEST_DATABASE_URL=postgres://starter:starter-admin-dev@127.0.0.1:${port}/starter"
-      echo "export STARTER_PG_CONTAINER=$("${compose[@]}" ps -q postgres)"
+      printf 'export STARTER_TEST_DATABASE_URL=%q\n' "postgres://starter:starter-admin-dev@127.0.0.1:${port}/starter"
+      printf 'export STARTER_PG_CONTAINER=%q\n' "$("${compose[@]}" ps -q postgres)"
     fi
     ;;
   *) echo "stack: unknown command '${1:-}'. Commands: up, down, reset, env (see --help)" >&2; exit 2 ;;

@@ -42,7 +42,7 @@ use crate::mail::{MailTransport, Message};
 use crate::password::PasswordGate;
 use crate::signin::{MailGate, MailRates, SignInGate, SignInRates};
 
-pub use crate::routes::router;
+pub use crate::routes::{csrf_guard, router};
 
 /// The kit's settings (each has a variable in `deploy/env.example`).
 #[derive(Debug, Clone)]

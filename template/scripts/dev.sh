@@ -25,9 +25,12 @@ port="${STARTER_DEV_PORT:-61450}"
 # Validate before any arithmetic: $((port + 7)) on 'a[$(cmd)]' would run the command.
 case "$port" in ''|*[!0-9]*) echo "error: not a port number: $port" >&2; exit 2 ;; esac
 sink_port=$((port + 7))
+band="$(cat scripts/port-band)"
+[[ "$band" =~ ^[1-9][0-9]{1,4}-[1-9][0-9]{1,4}$ ]] || { echo "error: scripts/port-band must be <low>-<high>, got '$band'" >&2; exit 2; }
+band_low="${band%%-*}" band_high="${band##*-}"
 for p in "$port" "$sink_port"; do
-  if ! { [[ $p =~ ^[1-9][0-9]{0,4}$ ]] && (( 10#$p >= 61400 && 10#$p <= 61499 )); }; then
-    echo "error: $p is outside this project's port band 61400-61499 (STARTER_DEV_PORT)" >&2
+  if ! { [[ $p =~ ^[1-9][0-9]{0,4}$ ]] && (( 10#$p >= 10#$band_low && 10#$p <= 10#$band_high )); }; then
+    echo "error: $p is outside this project's port band $band_low-$band_high (STARTER_DEV_PORT)" >&2
     exit 2
   fi
 done

@@ -50,7 +50,7 @@ for path in sys.argv[1:]:
         m = KEY.match(line)
         if not m:
             continue
-        ni = indent + (2 if m.group(2) else 0)   # a "- key" item's keys live one level deeper
+        ni = indent + (len(m.group(2)) if m.group(2) else 0)   # a "- key" item's keys live one level deeper
         if m.group(2):                            # a new sequence item starts a fresh mapping
             while levels and levels[-1][0] >= ni:
                 levels.pop()

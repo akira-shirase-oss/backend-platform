@@ -114,7 +114,6 @@ pub async fn project_status(
     let project = project_id(&project)?;
     let status = platform_db::project_status(&state.db, &project)
         .await?
-        // ATTACK(operation-lookup)
         .ok_or(ApiError::NotFound)?;
     Ok(Json(status).into_response())
 }
@@ -127,7 +126,6 @@ pub async fn get_operation(
     let id = operation_id(&id)?;
     let operation = platform_db::log::get(&state.db, id)
         .await?
-        // ATTACK(operation-lookup)
         .ok_or(ApiError::NotFound)?;
     Ok(Json(operation).into_response())
 }

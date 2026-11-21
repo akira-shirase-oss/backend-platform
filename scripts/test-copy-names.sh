@@ -26,7 +26,9 @@ for name in ab abcdefghijklmnop; do
   )
   # The same leftover grep --verify runs: a rename rule that misses a template name
   # (seen: starter-attacks) ships a copy that still links the template's crates.
-  left="$(grep -rIn --exclude-dir=target -E '(^|[^A-Za-z0-9])starter[-_]|(^|[^A-Z0-9])STARTER_|starterctl' "$dest" | grep -v TEMPLATE_ORIGIN || true)"
+  # -a and LC_ALL=C: GNU grep skips lines it cannot decode, which is exactly
+  # where a non-UTF-8 leftover (a fuzz corpus seed) would hide.
+  left="$(LC_ALL=C grep -rIna --exclude-dir=target -E '(^|[^A-Za-z0-9])starter[-_]|(^|[^A-Z0-9])STARTER_|starterctl|(id|nologin|--service|is-active|-u|--value|stop|enable) starter\b' "$dest" | grep -v TEMPLATE_ORIGIN || true)"
   if [ -n "$left" ]; then
     echo "error: names the rename missed:" >&2
     echo "$left" >&2

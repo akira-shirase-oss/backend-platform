@@ -279,3 +279,47 @@ async fn cross_origin_cookie_posts_are_refused() {
         assert_eq!(r.json::<serde_json::Value>().await.unwrap()["name"], "real");
     }
 }
+
+/// The guard must cover product routes too: a copy merges its writes into `/v1`
+/// after the kit's own `.layer`, which cannot see them. `POST /note` is the
+/// sample product write — a foreign-Origin cookie post to it is refused.
+#[tokio::test]
+async fn a_product_post_is_csrf_guarded_too() {
+    let s = spawn().await;
+    let client = reqwest::Client::new();
+    let session = s.verified_session("csrf-product@example.test").await;
+    let cookie = format!("starter_session={session}");
+    let created = client
+        .post(s.url("/v1/workspaces"))
+        .header("cookie", &cookie)
+        .json(&json!({ "name": "product-csrf" }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(created.status().as_u16(), 201);
+    let ws = created.json::<serde_json::Value>().await.unwrap()["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+
+    let forged = client
+        .post(s.url(&format!("/v1/workspaces/{ws}/note")))
+        .header("cookie", &cookie)
+        .header("origin", "https://evil.example")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(
+        forged.status().as_u16(),
+        403,
+        "a product write ran from a foreign origin"
+    );
+    // Same cookie, same route, no foreign origin: the write reaches its handler.
+    let real = client
+        .post(s.url(&format!("/v1/workspaces/{ws}/note")))
+        .header("cookie", &cookie)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(real.status().as_u16(), 200, "the product write was refused");
+}

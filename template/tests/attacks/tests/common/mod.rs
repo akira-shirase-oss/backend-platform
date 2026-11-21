@@ -143,7 +143,10 @@ pub async fn spawn_with(tune: impl FnOnce(&mut (Settings, StackLimits))) -> Inst
     )
     .await
     .unwrap();
-    let app = Router::new().nest("/v1", starter_accounts::router(accounts.clone()));
+    // The real /v1 composition — the kit plus the product sample under the same
+    // guards — so product routes take the attack inputs too. 64 mirrors
+    // STARTER_MAX_IN_FLIGHT's documented default.
+    let app = Router::new().nest("/v1", starter_server::v1(accounts.clone(), 64));
     let app = stack::apply(app, limits, Arc::new(ErrorWindow::default()));
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
@@ -182,7 +185,7 @@ pub async fn spawn_serve() -> Instance {
     )
     .await
     .unwrap();
-    let app = Router::new().nest("/v1", starter_accounts::router(accounts.clone()));
+    let app = Router::new().nest("/v1", starter_server::v1(accounts.clone(), 64));
     let app = stack::apply(
         app,
         StackLimits::default(),

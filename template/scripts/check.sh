@@ -55,9 +55,11 @@ scripts/check-pins.sh
 sample="$(mktemp)"
 for unpinned in 'services:\n  db:\n    image: postgres:18\n' 'steps:\n  - uses: actions/checkout@v7\n'; do
   printf '%b' "$unpinned" >"$sample"
-  if scripts/check-pins.sh "$sample" >/dev/null 2>&1; then
-    echo "error: the pin check did not catch: $unpinned" >&2
-    rm -f "$sample"
+  status=0
+  scripts/check-pins.sh "$sample" >/dev/null 2>&1 || status=$?
+  if [ "$status" -ne 1 ]; then
+    echo "error: the pin check did not catch: $unpinned (exit $status)" >&2
+    rm -f "$sample" "$outofband" "$dup" 2>/dev/null || true
     exit 1
   fi
 done
@@ -66,24 +68,28 @@ rm -f "$sample"
 # The copy's port band: every port it binds stays inside it (docs/COPYING.md). The
 # out-of-band probes reach the sample file through printf %s, so this script itself
 # holds no offending literal for the check to flag.
-port_band="${PORT_BAND:=61400-61499}"
+port_band="${PORT_BAND:-$(cat scripts/port-band)}"
 step "ports inside the band $port_band, and the check can fail"
 PORT_BAND="$port_band" scripts/check-ports.sh
 band_low="${port_band%%-*}" band_high="${port_band##*-}"
 sample="$(mktemp)"
 for bad in "  - \"$((band_low - 1)):5432\"" 'port=8080'; do
   printf '%s\n' "$bad" >"$sample"
-  if PORT_BAND="$port_band" scripts/check-ports.sh "$sample" >/dev/null 2>&1; then
-    echo "error: the port check did not catch: $bad" >&2
-    rm -f "$sample"
+  status=0
+  PORT_BAND="$port_band" scripts/check-ports.sh "$sample" >/dev/null 2>&1 || status=$?
+  if [ "$status" -ne 1 ]; then
+    echo "error: the port check did not catch: $bad (exit $status)" >&2
+    rm -f "$sample" "$outofband" "$dup" 2>/dev/null || true
     exit 1
   fi
 done
 for n in $((band_low - 1)) $((band_high + 1)); do
   printf 'echo http://127.0.0.1:%s/livez\n' "$n" >"$sample"
-  if PORT_BAND="$port_band" scripts/check-ports.sh "$sample" >/dev/null 2>&1; then
-    echo "error: the port check did not catch a loopback port $n outside the band" >&2
-    rm -f "$sample"
+  status=0
+  PORT_BAND="$port_band" scripts/check-ports.sh "$sample" >/dev/null 2>&1 || status=$?
+  if [ "$status" -ne 1 ]; then
+    echo "error: the port check did not catch a loopback port $n outside the band (exit $status)" >&2
+    rm -f "$sample" "$outofband" "$dup" 2>/dev/null || true
     exit 1
   fi
 done
@@ -93,8 +99,10 @@ step "workflow files parse with no duplicate keys, and the check can fail"
 scripts/check-workflows.sh
 sample="$(mktemp)"
 printf 'jobs:\n  build:\n    steps: []\n  build:\n    steps: []\n' >"$sample"
-if scripts/check-workflows.sh "$sample" >/dev/null 2>&1; then
-  echo "error: the workflow check passed a duplicate key" >&2
+status=0
+scripts/check-workflows.sh "$sample" >/dev/null 2>&1 || status=$?
+if [ "$status" -ne 1 ]; then
+  echo "error: the workflow check passed a duplicate key (exit $status)" >&2
   rm -f "$sample"
   exit 1
 fi
@@ -103,8 +111,10 @@ rm -f "$sample"
 step "results name no host, and the check can fail"
 scripts/check-results.sh
 printf '{"machine":{"path":"/home/someone/x"}}\n' >"$sample"
-if scripts/check-results.sh "$sample" >/dev/null 2>&1; then
-  echo "error: the results check passed a home path" >&2
+status=0
+scripts/check-results.sh "$sample" >/dev/null 2>&1 || status=$?
+if [ "$status" -ne 1 ]; then
+  echo "error: the results check passed a home path (exit $status)" >&2
   rm -f "$sample"
   exit 1
 fi

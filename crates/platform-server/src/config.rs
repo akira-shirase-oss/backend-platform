@@ -107,7 +107,7 @@ impl Config {
     /// arbitrary values without mutating the process environment.
     pub fn from_lookup(lookup: impl Fn(&str) -> Option<String>) -> Result<Self, String> {
         let var = |name: &str| lookup(name).filter(|v| !v.is_empty());
-        // ATTACK(config-default)
+        // ATTACK(config-parse)
         let defaults = Self::default();
         let mut errors = Vec::new();
         let database_url = var("BP_DATABASE_URL").unwrap_or_else(|| {

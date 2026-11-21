@@ -100,8 +100,12 @@ async fn a_head_with_content_length_and_transfer_encoding_reads_chunked() {
     let body = format!(
         "{{\"invite\":{invite:?},\"email\":\"smuggle@example.test\",\"password\":\"{PASSWORD}\"}}"
     );
+    // A second request pipelined behind the first: RFC 9112 §6.1 requires the
+    // connection to close after an ambiguous-framing response, so it must never
+    // be answered — exactly one response, then EOF.
     let head = format!(
-        "POST /v1/signup HTTP/1.1\r\nHost: x\r\nContent-Type: application/json\r\nContent-Length: 4\r\nTransfer-Encoding: chunked\r\n\r\n{:x}\r\n{body}\r\n0\r\n\r\n",
+        "POST /v1/signup HTTP/1.1\r\nHost: x\r\nContent-Type: application/json\r\nContent-Length: 4\r\nTransfer-Encoding: chunked\r\n\r\n{:x}\r\n{body}\r\n0\r\n\r\n\
+         GET /v1/me HTTP/1.1\r\nHost: x\r\n\r\n",
         body.len()
     );
     let reply = raw(&s, head.as_bytes(), Duration::from_secs(5)).await;
@@ -109,6 +113,11 @@ async fn a_head_with_content_length_and_transfer_encoding_reads_chunked() {
         raw_status(&reply),
         201,
         "the chunked body did not win over the declared Content-Length: {reply:?}"
+    );
+    assert_eq!(
+        reply.matches("HTTP/1.1 ").count(),
+        1,
+        "the connection stayed open and answered the pipelined request: {reply:?}"
     );
 }
 

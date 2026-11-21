@@ -26,6 +26,14 @@ case "${1:-}" in
 esac
 : "${STARTER_TEST_DATABASE_URL:?is not set. Start the database and export its address: scripts/stack.sh up; eval \"\$(scripts/stack.sh env)\"}"
 
+# The proof runs over committed state: an uncommitted or untracked file would
+# carry markers, tests or protections into the scratch copy that CI never sees.
+if [ -n "$(git status --porcelain -- .)" ]; then
+  echo "error: prove-attacks.sh needs a clean tree - commit or stash first:" >&2
+  git status --porcelain -- . >&2
+  exit 1
+fi
+
 work="$(mktemp -d "${TMPDIR:-/tmp}/starter-prove-attacks.XXXXXX")"
 trap 'rm -rf "$work"' EXIT
 tar --exclude ./target --exclude ./.git -cf - . | tar -xf - -C "$work"
@@ -40,20 +48,22 @@ mutations=(
   "dup-session-cookie|crates/starter-accounts/src/lib.rs|pairs\.next\(\)\.is_some\(\)	pairs.next().is_none()|starter-attacks|auth_bypass|duplicate_session_cookies_are_refused"
   "token-lookup|crates/starter-accounts/src/lib.rs|ok_or\(AccountsError::Unauthenticated\)\?;	unwrap_or((Uuid::nil(), Uuid::nil()));|starter-attacks|auth_bypass|garbage_sessions_and_tokens_are_refused"
   "origin-check|crates/starter-accounts/src/routes.rs|o != accounts\.settings\(\)\.public_url	o != o|starter-attacks|auth_bypass|cross_origin_cookie_posts_are_refused"
+  "origin-check|crates/starter-accounts/src/routes.rs|o != accounts\.settings\(\)\.public_url	o != o|starter-attacks|auth_bypass|a_product_post_is_csrf_guarded_too"
   # --- bodies ---
   "body-limit|crates/starter-http/src/stack.rs|limits\.max_body_bytes	usize::MAX|starter-attacks|bodies|a_body_past_the_limit_is_413_whether_declared_or_streamed"
   "request-timeout|crates/starter-http/src/stack.rs|limits\.request_timeout,	Duration::from_secs(3600),|starter-attacks|bodies|a_slow_dribbled_body_times_out_and_the_server_stays_up"
   "invalid-is-422|crates/starter-accounts/src/error.rs|UNPROCESSABLE_ENTITY	INTERNAL_SERVER_ERROR|starter-attacks|replay|an_email_with_header_injection_is_refused"
+  "known-fields|crates/starter-accounts/src/routes.rs|deny_unknown_fields	crate = \"serde\"|starter-attacks|bodies|malformed_bodies_are_4xx_never_5xx"
   # --- fuzz ---
   "cookie-parse|crates/starter-accounts/src/lib.rs|v\.to_str\(\)\.ok\(\)	Some(v.to_str().unwrap())|starter-attacks|fuzz|seed_corpus_replays_without_panics"
   "cookie-parse|crates/starter-accounts/src/lib.rs|v\.to_str\(\)\.ok\(\)	Some(v.to_str().unwrap())|starter-attacks|fuzz|session_cookie_never_panics"
   "auth-parse|crates/starter-accounts/src/lib.rs|value\.to_str\(\)\.ok\(\)\?	value.to_str().unwrap()|starter-attacks|fuzz|authorization_never_panics"
   "auth-parse|crates/starter-accounts/src/lib.rs|value\.to_str\(\)\.ok\(\)\?	value.to_str().unwrap()|starter-attacks|fuzz|seed_corpus_replays_without_panics"
-  "token-shape|crates/starter-accounts/src/tokens.rs|secret\.len\(\) == 64	secret.bytes().nth(70).unwrap().is_ascii()|starter-attacks|fuzz|token_parsers_never_panic"
+  "token-parse|crates/starter-accounts/src/tokens.rs|secret\.len\(\) == 64	secret.bytes().nth(70).unwrap().is_ascii()|starter-attacks|fuzz|token_parsers_never_panic"
   "xff-parse|crates/starter-http/src/client.rs|hop\.trim\(\)\.parse::<IpAddr>\(\)	Ok::<IpAddr, std::net::AddrParseError>(hop.trim().parse::<IpAddr>().unwrap())|starter-attacks|fuzz|xff_parsing_never_panic_or_reads_past_the_rightmost_entry"
   "email-parse|crates/starter-accounts/src/domain.rs|split_once\('@'\)\?	split_once('@').unwrap()|starter-attacks|fuzz|validators_never_panic"
   "public-url-loopback|crates/starter-server/src/config.rs|if !loopback	if false|starter-attacks|fuzz|config_refuses_garbage_values_and_names_the_variable"
-  "config-default|crates/starter-server/src/config.rs|default_of\(name\)\.to_owned\(\)	panic!(\"config\")|starter-attacks|fuzz|config_never_panics_or_accepts_garbage"
+  "config-parse|crates/starter-server/src/config.rs|default_of\(name\)\.to_owned\(\)	panic!(\"config\")|starter-attacks|fuzz|config_never_panics_or_accepts_garbage"
   # --- headers ---
   "header-cap|crates/starter-http/src/serve.rs|max_buf_size\(64 \* 1024\)	max_buf_size(usize::MAX)|starter-attacks|headers|oversized_headers_are_431"
   "header-read|crates/starter-http/src/serve.rs|header_read_timeout\(limits\.header_read_timeout\)	header_read_timeout(Duration::from_secs(3600))|starter-attacks|headers|dribbled_headers_are_closed_by_the_deadline"
@@ -65,8 +75,8 @@ mutations=(
   # --- replay ---
   "invite-single-use|crates/starter-accounts/src/store.rs|used_at IS NULL AND	|starter-attacks|replay|an_invite_is_spent_once"
   "verify-single-use|crates/starter-accounts/src/store.rs|used_at IS NULL AND	|starter-attacks|replay|a_verify_token_cannot_be_replayed"
-  "reset-single-use|crates/starter-accounts/src/store.rs|used_at IS NULL AND	|starter-attacks|replay|a_reset_token_is_spent_once_and_expires"
-  "reset-expiry|crates/starter-accounts/src/store.rs|AND expires_at > now\(\)	|starter-attacks|replay|a_reset_token_is_spent_once_and_expires"
+  "reset-single-use|crates/starter-accounts/src/store.rs|used_at IS NULL AND	|starter-attacks|replay|a_reset_token_is_spent_once"
+  "reset-expiry|crates/starter-accounts/src/store.rs|AND expires_at > now\(\)	|starter-attacks|replay|an_expired_reset_token_is_refused"
   "sign-out-revokes|crates/starter-accounts/src/store.rs|DELETE FROM sessions WHERE digest = \\\$1	UPDATE sessions SET user_id = user_id WHERE digest = \$1|starter-attacks|replay|a_signed_out_session_is_dead"
   "signin-indistinct|crates/starter-accounts/src/routes.rs|found\.map\(\x7cu\x7c \(u\.id, u\.password_hash\)\)	match found { Some(u) => Some((u.id, u.password_hash)), None => return Err(AccountsError::NotFound) }|starter-attacks|replay|sign_in_does_not_disclose_which_side_failed"
   "email-shape|crates/starter-accounts/src/routes.rs|domain::normalize_email\(raw\)	Some(raw.to_owned())|starter-attacks|replay|an_email_with_header_injection_is_refused"
@@ -91,7 +101,6 @@ EXEMPTIONS=(
   "a_head_with_content_length_and_transfer_encoding_reads_chunked|hyper's HTTP/1 parser disambiguates to chunked (RFC 9112); no in-tree line to mutate"
   "conflicting_content_length_headers_are_refused|hyper's HTTP/1 parser refuses ambiguous framing; no in-tree line to mutate"
   "sql_metacharacters_round_trip_as_data|parameterised queries are structural across store.rs, not a flippable line"
-  "malformed_bodies_are_4xx_never_5xx|axum's Json extractor refuses malformed bodies before a route runs; no in-tree line to mutate"
   "request_bodies_through_the_router_never_5xx|axum's Json extractor refuses malformed bodies before a route runs; no in-tree line to mutate"
 )
 
@@ -154,6 +163,16 @@ open(path, "w").write("\n".join(lines))
 PY
 }
 
+# Baseline: every test the table names must pass on the unmutated tree, or a
+# later failure is a test that was already red - not the mutation's work.
+for package in $(printf '%s\n' "${mutations[@]}" | cut -d'|' -f4 | sort -u); do
+  echo "baseline: $package tests on the unmutated tree"
+  if ! (cd "$work" && cargo test --locked -q -p "$package" --tests); then
+    echo "error: baseline failed - the unmutated suite is already red" >&2
+    exit 1
+  fi
+done
+
 failures=0
 ran=0
 results=()
@@ -172,7 +191,8 @@ for row in "${mutations[@]}"; do
   status=$?
   set -e
   seconds=$(( $(date +%s) - started ))
-  if [ "$status" -ne 0 ] && grep -q 'test result: FAILED' <<<"$output"; then
+  if [ "$status" -ne 0 ] && grep -q 'test result: FAILED' <<<"$output" \
+      && grep -qF "test ${test} ... FAILED" <<<"$output"; then
     verdict=proven
     cp "$here/$file" "$work/$file"
     printf '  proven   %-24s %s fails without it (%ss)\n' "$name" "$test" "$seconds"
@@ -199,6 +219,10 @@ if [ -n "$out" ]; then
   printf '{"proof":"attacks","commit":"%s","tree_dirty":%s,"load_average":"%s","os":"%s","results":[%s]}\n' \
     "$commit" "$dirty" "$load" "$(uname -sr)" "$(IFS=,; echo "${results[*]}")" >"$out"
   echo "record: $out"
+fi
+if [ "$ran" -eq 0 ]; then
+  echo "error: no mutations ran (PROVE_ONLY='${PROVE_ONLY:-}' matched nothing)" >&2
+  exit 1
 fi
 if (( failures )); then
   echo "error: $failures of $ran attack mutations are not proven" >&2

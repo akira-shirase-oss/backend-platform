@@ -9,7 +9,7 @@ use std::sync::Arc;
 
 use axum::Router;
 use axum::extract::{Path, State};
-use axum::routing::get;
+use axum::routing::{get, post};
 use serde_json::json;
 use starter_accounts::Accounts;
 use starter_accounts::domain::Action;
@@ -46,23 +46,50 @@ async fn hello(
     ))
 }
 
+/// A sample product write: any member may post a note; an API token may not —
+/// `Action::Write` is the member-only boundary for a copy's own mutating routes.
+async fn note(
+    State(accounts): State<Accounts>,
+    headers: axum::http::HeaderMap,
+    Path(workspace): Path<Uuid>,
+) -> Result<axum::Json<serde_json::Value>, AccountsError> {
+    let access = accounts.access(&headers, workspace, Action::Write).await?;
+    Ok(axum::Json(
+        json!({ "workspace": access.workspace, "note": "saved" }),
+    ))
+}
+
+/// `/v1`: the kit's routes merged with the product's, all inside the CSRF origin
+/// guard and the in-flight shed gate. A copy merges its routes into `product` —
+/// `route_layer` here covers them, which a `.layer` inside `router()` cannot (it
+/// wraps only the routes present when it is added).
+pub fn v1(accounts: Accounts, max_in_flight: usize) -> Router {
+    let product = Router::new()
+        .route("/workspaces/{workspace}/hello", get(hello))
+        .route("/workspaces/{workspace}/note", post(note))
+        .with_state(accounts.clone());
+    starter_accounts::router(accounts.clone())
+        .merge(product)
+        .route_layer(axum::middleware::from_fn_with_state(
+            stack::gate(max_in_flight),
+            stack::shed,
+        ))
+        .route_layer(axum::middleware::from_fn_with_state(
+            accounts,
+            starter_accounts::csrf_guard,
+        ))
+}
+
 /// The whole router with the middleware stack. `/livez`, `/readyz` and `/errorz` are
 /// never shed; everything under `/v1` is.
 pub fn app(state: AppState) -> Router {
-    let product = Router::new()
-        .route("/workspaces/{workspace}/hello", get(hello))
-        .with_state(state.accounts.clone());
-    let v1 = starter_accounts::router(state.accounts.clone())
-        .merge(product)
-        .route_layer(axum::middleware::from_fn_with_state(
-            stack::gate(state.max_in_flight),
-            stack::shed,
-        ));
     let health = Router::new()
         .route("/livez", get(health::livez))
         .route("/readyz", get(health::readyz))
         .route("/errorz", get(health::errorz))
         .with_state(state.health.clone());
-    let router = Router::new().nest("/v1", v1).merge(health);
+    let router = Router::new()
+        .nest("/v1", v1(state.accounts.clone(), state.max_in_flight))
+        .merge(health);
     stack::apply(router, state.stack, state.errors)
 }

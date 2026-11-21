@@ -43,9 +43,11 @@ scripts/check-pins.sh
 unpinned="$(mktemp)"
 for sample in 'services:\n  db:\n    image: postgres:18\n' 'steps:\n  - uses: actions/checkout@v7\n'; do
   printf '%b' "$sample" >"$unpinned"
-  if scripts/check-pins.sh "$unpinned" >/dev/null 2>&1; then
-    echo "error: the pin check did not catch: $sample" >&2
-    rm -f "$unpinned"
+  status=0
+  scripts/check-pins.sh "$unpinned" >/dev/null 2>&1 || status=$?
+  if [ "$status" -ne 1 ]; then
+    echo "error: the pin check did not catch: $sample (exit $status)" >&2
+    rm -f "$sample" "$outofband" "$dup" 2>/dev/null || true
     exit 1
   fi
 done
@@ -60,9 +62,11 @@ scripts/check-ports.sh
 outofband="$(mktemp)"
 for spec in 'ports:\n      - "%s:8000"\n|58000' 'curl http://127.0.0.1:%s/health\n|8080'; do
   printf "${spec%|*}" "${spec#*|}" >"$outofband"
-  if scripts/check-ports.sh "$outofband" >/dev/null 2>&1; then
-    echo "error: the port check did not catch: $spec" >&2
-    rm -f "$outofband"
+  status=0
+  scripts/check-ports.sh "$outofband" >/dev/null 2>&1 || status=$?
+  if [ "$status" -ne 1 ]; then
+    echo "error: the port check did not catch: $spec (exit $status)" >&2
+    rm -f "$sample" "$outofband" "$dup" 2>/dev/null || true
     exit 1
   fi
 done
@@ -72,8 +76,10 @@ echo "port check proven able to fail"
 scripts/check-workflows.sh
 dup="$(mktemp)"
 printf 'jobs:\n  build:\n    steps: []\n  build:\n    steps: []\n' >"$dup"
-if scripts/check-workflows.sh "$dup" >/dev/null 2>&1; then
-  echo "error: the workflow check passed a duplicate key" >&2
+status=0
+scripts/check-workflows.sh "$dup" >/dev/null 2>&1 || status=$?
+if [ "$status" -ne 1 ]; then
+  echo "error: the workflow check passed a duplicate key (exit $status)" >&2
   rm -f "$dup"
   exit 1
 fi

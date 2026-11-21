@@ -91,13 +91,22 @@ impl TestDb {
         bootstrap(&admin_url, &name, OWNER_PASSWORD, RUNTIME_PASSWORD)
             .await
             .expect("bootstrapping the test database and roles");
-        // The pool the server under test runs on gets production pool settings; the
-        // small bounded pools from connect_as are for test-side helper queries only.
+        // The pool the server under test runs on keeps production statement and
+        // lock bounds, but not production pool size: four permits times the
+        // default 16 connections, on a shared machine, still wants headroom under
+        // PostgreSQL's default 100, and a loaded machine must wait on acquire.
         let runtime_url = role_url(&admin_url, RUNTIME_ROLE, RUNTIME_PASSWORD, &name)
             .expect("invariant: the admin URL is a postgres URL");
         Self {
-            pool: crate::pool::connect_lazy(&runtime_url, &crate::PoolSettings::default())
-                .expect("invariant: the runtime URL parses"),
+            pool: crate::pool::connect_lazy(
+                &runtime_url,
+                &crate::PoolSettings {
+                    max_connections: 8,
+                    acquire_timeout: Duration::from_secs(60),
+                    ..crate::PoolSettings::default()
+                },
+            )
+            .expect("invariant: the runtime URL parses"),
             admin_url,
             name,
             cleaned: false,
@@ -139,7 +148,7 @@ impl TestDb {
     /// A small helper pool on this database as `role`, for test-side queries: two
     /// connections, and an acquire timeout that is a liveness bound only — a loaded
     /// machine must wait, never time a test out. The pool the server under test runs
-    /// on is `TestDb::pool`, which keeps production pool settings.
+    /// on is `TestDb::pool`, which keeps production statement and lock bounds.
     pub async fn connect_as(&self, role: Role) -> PgPool {
         let options =
             crate::pool::connect_options(&self.url_as(role), &crate::PoolSettings::default())

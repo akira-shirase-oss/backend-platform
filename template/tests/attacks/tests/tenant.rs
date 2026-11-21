@@ -292,6 +292,12 @@ async fn a_member_cannot_perform_owner_actions() {
             format!("/v1/workspaces/{ws}/members"),
             Some(json!({ "email": "o@example.test", "role": "member" })),
         ),
+        // Self-promotion: adding an owner is refused to a member either way.
+        (
+            "POST",
+            format!("/v1/workspaces/{ws}/members"),
+            Some(json!({ "email": "member@example.test", "role": "owner" })),
+        ),
         ("DELETE", format!("/v1/workspaces/{ws}"), None),
     ] {
         let mut req = client

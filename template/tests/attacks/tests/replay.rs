@@ -72,7 +72,7 @@ async fn a_verify_token_cannot_be_replayed() {
 }
 
 #[tokio::test]
-async fn a_reset_token_is_spent_once_and_expires() {
+async fn a_reset_token_is_spent_once() {
     let s = spawn().await;
     let client = reqwest::Client::new();
     let session = s.verified_session("resettable@example.test").await;
@@ -83,20 +83,27 @@ async fn a_reset_token_is_spent_once_and_expires() {
     };
     assert_eq!(me(&client).send().await.unwrap().status().as_u16(), 200);
 
-    let confirm = |token: &str| {
+    // Distinct passwords per attempt: a refused confirm that still wrote would be
+    // invisible if every attempt used the signup password.
+    let confirm = |token: &str, password: &str| {
         client
             .post(s.url("/v1/password-reset/confirm"))
-            .json(&json!({ "token": token, "password": common::PASSWORD }))
+            .json(&json!({ "token": token, "password": password }))
     };
-    let request = |client: &reqwest::Client| {
+    let sign_in = |password: &str| {
+        client
+            .post(s.url("/v1/session"))
+            .json(&json!({ "email": "resettable@example.test", "password": password }))
+    };
+    assert_eq!(
         client
             .post(s.url("/v1/password-reset"))
             .json(&json!({ "email": "resettable@example.test" }))
-    };
-
-    // One use: the same token cannot reset again.
-    assert_eq!(
-        request(&client).send().await.unwrap().status().as_u16(),
+            .send()
+            .await
+            .unwrap()
+            .status()
+            .as_u16(),
         202
     );
     let token = s
@@ -106,8 +113,19 @@ async fn a_reset_token_is_spent_once_and_expires() {
         .unwrap()
         .token()
         .unwrap();
-    assert_eq!(confirm(&token).send().await.unwrap().status().as_u16(), 204);
-    let replayed = confirm(&token).send().await.unwrap();
+    assert_eq!(
+        confirm(&token, "first reset password")
+            .send()
+            .await
+            .unwrap()
+            .status()
+            .as_u16(),
+        204
+    );
+    let replayed = confirm(&token, "replay reset password")
+        .send()
+        .await
+        .unwrap();
     assert!(
         replayed.status().is_client_error(),
         "reset token replayed → {}",
@@ -120,23 +138,46 @@ async fn a_reset_token_is_spent_once_and_expires() {
         401,
         "session survived a password reset"
     );
-    // The replayed confirm also did not silently change the password again: the first
-    // reset's password is the one that signs in.
-    let sign_in = client
-        .post(s.url("/v1/session"))
-        .json(&json!({ "email": "resettable@example.test", "password": common::PASSWORD }))
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(
-        sign_in.status().as_u16(),
-        200,
-        "password after reset: {sign_in:?}"
+    // The replayed confirm did not silently write: its password does not sign in,
+    // and the first reset's password does.
+    let replay_password = sign_in("replay reset password").send().await.unwrap();
+    assert!(
+        replay_password.status().is_client_error(),
+        "a replayed confirm's password signed in → {}",
+        replay_password.status()
     );
-
-    // Expiry: a token whose lifetime passed is refused even unused.
+    let first = sign_in("first reset password").send().await.unwrap();
     assert_eq!(
-        request(&client).send().await.unwrap().status().as_u16(),
+        first.status().as_u16(),
+        200,
+        "password after reset: {first:?}"
+    );
+}
+
+#[tokio::test]
+async fn an_expired_reset_token_is_refused() {
+    let s = spawn().await;
+    let client = reqwest::Client::new();
+    s.verified_session("resettable@example.test").await;
+    let confirm = |token: &str, password: &str| {
+        client
+            .post(s.url("/v1/password-reset/confirm"))
+            .json(&json!({ "token": token, "password": password }))
+    };
+    let sign_in = |password: &str| {
+        client
+            .post(s.url("/v1/session"))
+            .json(&json!({ "email": "resettable@example.test", "password": password }))
+    };
+    assert_eq!(
+        client
+            .post(s.url("/v1/password-reset"))
+            .json(&json!({ "email": "resettable@example.test" }))
+            .send()
+            .await
+            .unwrap()
+            .status()
+            .as_u16(),
         202
     );
     let token = s
@@ -150,21 +191,25 @@ async fn a_reset_token_is_spent_once_and_expires() {
         .execute(&s.db.pool)
         .await
         .unwrap();
-    let expired = confirm(&token).send().await.unwrap();
+    let expired = confirm(&token, "expired reset password")
+        .send()
+        .await
+        .unwrap();
     assert!(
         expired.status().is_client_error(),
         "expired reset token accepted → {}",
         expired.status()
     );
-    // The old session rules apply: the expired confirm changed nothing — signing in with
-    // the current password still works.
-    let sign_in = client
-        .post(s.url("/v1/session"))
-        .json(&json!({ "email": "resettable@example.test", "password": common::PASSWORD }))
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(sign_in.status().as_u16(), 200);
+    // The expired confirm changed nothing: its password does not sign in, and the
+    // signup password still does.
+    let expired_password = sign_in("expired reset password").send().await.unwrap();
+    assert!(
+        expired_password.status().is_client_error(),
+        "an expired confirm's password signed in → {}",
+        expired_password.status()
+    );
+    let still = sign_in(common::PASSWORD).send().await.unwrap();
+    assert_eq!(still.status().as_u16(), 200);
 }
 
 #[tokio::test]

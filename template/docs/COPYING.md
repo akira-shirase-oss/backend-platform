@@ -32,7 +32,7 @@ Then, by hand:
 
 1. `git init`, push, and turn on the copied CI (`.github/workflows/ci.yml`) and Dependabot.
 2. Pick the product's own port band (above Linux's ephemeral range, which ends at 60999)
-   and set it in `scripts/check.sh` (`port_band=`): `scripts/check-ports.sh` then fails
+   and set it in `scripts/port-band` (the one file every port check reads): `scripts/check-ports.sh` then fails
    any literal port outside it. Pick the product's own ports inside the band (the
    template uses 61450 for the server, 61433 for the development database), the API-token
    prefix (`tokens::API_TOKEN_PREFIX`, `st_`), and the `From` address.
@@ -73,6 +73,7 @@ is a review item for every change to either side.
 | the PostgreSQL major | the manifest's digests (re-derive on the new major) | the same |
 | a variable in `config.rs` | `deploy/env.example` | `the_environment_template_lists_every_variable_and_no_other` |
 | a new bound (`// LIMIT(name)`) | a mutation row in `scripts/prove-limits.sh` and the test that proves it | `prove-limits.sh` refuses a marker without a mutation |
+| a new protection (`// ATTACK(name)`) | a mutation row in `scripts/prove-attacks.sh` (or a named exemption) and the test that proves it | `prove-attacks.sh` refuses a marker or attack test without coverage |
 | `STARTER_LISTEN`'s port | `deploy/Caddyfile`'s upstream | review |
 | `STARTER_DRAIN_TIMEOUT_MS` | `TimeoutStopSec=` in the unit (longer than the drain) | review |
 | `STARTER_MAX_CONNECTIONS` | `LimitNOFILE=` in the unit (higher, with headroom for the pool) | review |

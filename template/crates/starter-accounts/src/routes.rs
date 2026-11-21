@@ -61,8 +61,10 @@ pub fn router(accounts: Accounts) -> Router {
 /// A session cookie rides along on cross-site posts, so a mutating request that
 /// presents one and an `Origin` that is not the kit's own URL is CSRF-shaped:
 /// refuse it before the handler runs. Bearer-token callers carry no ambient
-/// authority and are unaffected; safe methods are not state-changing.
-async fn csrf_guard(
+/// authority and are unaffected; safe methods are not state-changing. Applied
+/// once here and again over the whole `/v1` in `starter_server::v1`, so product
+/// routes merged later are covered too.
+pub async fn csrf_guard(
     axum::extract::State(accounts): axum::extract::State<Accounts>,
     request: axum::extract::Request,
     next: axum::middleware::Next,
@@ -111,6 +113,7 @@ fn internal(e: impl Into<anyhow::Error>) -> AccountsError {
 }
 
 #[derive(Deserialize)]
+// ATTACK(known-fields)
 #[serde(deny_unknown_fields)]
 struct SignUp {
     invite: String,
