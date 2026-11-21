@@ -179,7 +179,7 @@ for row in "${mutations[@]}"; do
   set -e
   seconds=$(( $(date +%s) - started ))
   if [ "$status" -ne 0 ] && grep -q 'test result: FAILED' <<<"$output" \
-      && grep -qF "test ${test} ... FAILED" <<<"$output"; then
+      && grep -qE "${test} (\\.\\.\\.|-) FAILED" <<<"$output"; then
     verdict=proven
     cp "$here/$file" "$work/$file"
     printf '  proven   %-24s %s fails without it (%ss)\n' "$name" "$test" "$seconds"
