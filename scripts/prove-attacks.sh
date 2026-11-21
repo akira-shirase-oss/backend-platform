@@ -41,6 +41,7 @@ fi
 mkdir -p target
 work="$here/target/prove-attacks-work"
 rm -rf "$work"
+mkdir "$work"
 trap 'rm -rf "$work"' EXIT
 tar --exclude ./target --exclude ./.git -cf - . | tar -xf - -C "$work"
 export CARGO_TARGET_DIR="$here/target/prove-attacks"
