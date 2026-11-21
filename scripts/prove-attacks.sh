@@ -240,7 +240,7 @@ for row in "${mutations[@]}"; do
       && grep -qE "${test} [-.]+ FAILED" <<<"$output"; then
     named=1
     if [ -n "$pin" ]; then
-      grep -qF "panicked at ${pin}" <<<"$output" \
+      grep -qE "panicked at .*${pin}" <<<"$output" \
         || grep -qE "panicked at .*tests/${target}\\.rs:" <<<"$output" && kills=1
     else
       grep -qE "panicked at .*tests/${target}\\.rs:" <<<"$output" && kills=1
