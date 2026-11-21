@@ -215,6 +215,16 @@ impl Source for BTreeMap<&str, &str> {
 /// port (a browser serialises `https://x:443` as `https://x`, so accepting the
 /// form would make the CSRF comparison miss every legitimate POST).
 fn origin_host_port(url: &str) -> Option<(String, Option<u16>)> {
+    // A browser serializes an Origin exactly once; any form it would rewrite —
+    // an uppercase or %-encoded host, a padded or explicit default port, a
+    // bracketed non-IPv6 literal — is refused rather than normalised, since the
+    // CSRF guard compares the header byte-for-byte with this configured URL.
+    if url::Url::parse(url)
+        .ok()
+        .is_none_or(|u| u.origin().ascii_serialization() != url)
+    {
+        return None;
+    }
     let (scheme, rest) = url
         .strip_prefix("https://")
         .map(|r| ("https", r))
@@ -617,6 +627,10 @@ mod tests {
             ("http://127.0.0.1:80", false),
             ("http://localhost:+8080", false),
             ("http://127.0.0.1\u{1}:8080", false),
+            // A browser rewrites each of these, so the round-trip fails them.
+            ("http://[localhost]:61450", false),
+            ("https://app.example.com:08443", false),
+            ("https://%61pp.example.com", false),
             ("https://app.example.com:8443", true),
         ] {
             let source = BTreeMap::from([

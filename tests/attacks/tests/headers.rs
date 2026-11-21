@@ -27,6 +27,7 @@ async fn forwarding_headers_do_not_elevate_an_anonymous_request() {
             .send()
             .await
             .unwrap();
+        // DECISIVE(forwarding_headers_do_not_elevate_an_anonymous_request)
         assert_eq!(r.status().as_u16(), 401, "{name}: {value}");
     }
 }
@@ -67,6 +68,7 @@ async fn a_valid_shaped_spoofed_request_id_is_propagated_and_an_invalid_one_repl
             .get("x-request-id")
             .and_then(|v| v.to_str().ok())
             .unwrap_or_default();
+        // DECISIVE(a_valid_shaped_spoofed_request_id_is_propagated_and_an_invalid_one_replaced)
         assert_ne!(echoed, bad, "invalid id {bad:?} was propagated");
         assert!(
             Uuid::parse_str(echoed).is_ok(),

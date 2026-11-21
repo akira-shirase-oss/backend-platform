@@ -75,6 +75,7 @@ async fn the_shed_gate_cannot_be_evaded_by_spoofed_client_headers() {
         if r.status().as_u16() == 503 && shed_code(r).await == "overloaded" {
             break;
         }
+        // DECISIVE(the_shed_gate_cannot_be_evaded_by_spoofed_client_headers)
         assert!(
             std::time::Instant::now() < deadline,
             "the gate never filled"

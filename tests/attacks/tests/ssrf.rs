@@ -33,6 +33,7 @@ async fn desired_state_refuses_every_smuggled_url_shape() {
             .send()
             .await
             .unwrap();
+        // DECISIVE(desired_state_refuses_every_smuggled_url_shape)
         assert!(
             r.status().is_client_error(),
             "case {i} was accepted: {body} → {}",

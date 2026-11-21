@@ -61,6 +61,7 @@ async fn a_workspace_is_invisible_to_a_non_member() {
             req = req.json(&body);
         }
         let r = req.send().await.unwrap();
+        // DECISIVE(a_workspace_is_invisible_to_a_non_member)
         assert_eq!(r.status().as_u16(), 404, "{method} {path}");
         assert_eq!(
             body_json(r).await["error"]["code"],
@@ -161,6 +162,7 @@ async fn an_api_token_sees_only_its_own_workspace_and_only_reads() {
             .send()
             .await
             .unwrap();
+        // DECISIVE(an_api_token_sees_only_its_own_workspace_and_only_reads)
         assert_eq!(r.status().as_u16(), want, "token GET {path}");
     }
 
@@ -307,6 +309,7 @@ async fn a_member_cannot_perform_owner_actions() {
             req = req.json(&body);
         }
         let r = req.send().await.unwrap();
+        // DECISIVE(a_member_cannot_perform_owner_actions)
         assert_eq!(r.status().as_u16(), 403, "member {method} {path}");
         assert_eq!(body_json(r).await["error"]["code"], "forbidden");
     }
@@ -354,6 +357,7 @@ async fn resource_ids_of_other_users_are_not_guessable() {
             .send()
             .await
             .unwrap();
+        // DECISIVE(resource_ids_of_other_users_are_not_guessable)
         assert_eq!(r.status().as_u16(), 404, "guessed {guess}");
     }
 }
@@ -405,6 +409,7 @@ async fn an_api_token_is_refused_every_write_at_the_access_layer() {
             .accounts
             .access(&headers, workspace, action)
             .await
+            // DECISIVE(an_api_token_is_refused_every_write_at_the_access_layer)
             .unwrap_err();
         assert!(
             matches!(err, starter_accounts::error::AccountsError::SessionRequired),
@@ -433,5 +438,6 @@ async fn me_only_ever_returns_the_callers_own_account() {
         .await
         .unwrap();
     let body: Value = r.json().await.unwrap();
+    // DECISIVE(me_only_ever_returns_the_callers_own_account)
     assert_eq!(body["email"].as_str().unwrap(), "dave@example.test");
 }

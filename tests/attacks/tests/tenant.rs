@@ -25,6 +25,7 @@ async fn another_projects_state_is_not_visible() {
     assert_eq!(put.status().as_u16(), 202);
 
     let alpha = authed(&client, Method::GET, &s.url("/v1/projects/alpha")).await;
+    // DECISIVE(another_projects_state_is_not_visible)
     assert_eq!(alpha.status().as_u16(), 200);
     // "beta" must get nothing of alpha: 404 with the standard envelope, no leak.
     let beta = authed(&client, Method::GET, &s.url("/v1/projects/beta")).await;
@@ -58,6 +59,7 @@ async fn operation_ids_are_not_guessable() {
             &s.url(&format!("/v1/operations/{guess}")),
         )
         .await;
+        // DECISIVE(operation_ids_are_not_guessable)
         assert_eq!(r.status().as_u16(), 404, "guessed {guess}");
         let r = authed(
             &client,
@@ -92,6 +94,7 @@ async fn path_traversal_and_encoding_tricks_are_refused() {
         )
         .await;
         let status = common::raw_status(&response);
+        // DECISIVE(path_traversal_and_encoding_tricks_are_refused)
         assert!(
             status == 400 || status == 404 || status == 405,
             "{path} → {status} (raw: {})",

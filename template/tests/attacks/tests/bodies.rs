@@ -24,6 +24,7 @@ async fn a_body_past_the_limit_is_413_whether_declared_or_streamed() {
         .send()
         .await
         .unwrap();
+    // DECISIVE(a_body_past_the_limit_is_413_whether_declared_or_streamed)
     assert_eq!(r.status().as_u16(), 413);
 
     // Chunked, crossing mid-stream.
@@ -74,6 +75,7 @@ async fn a_slow_dribbled_body_times_out_and_the_server_stays_up() {
     // the close — a timeout here means the connection was held open forever.
     let read =
         tokio::time::timeout(Duration::from_secs(5), stream.read_to_end(&mut response)).await;
+    // DECISIVE(a_slow_dribbled_body_times_out_and_the_server_stays_up)
     assert!(read.is_ok(), "server held the slow connection open");
     let text = String::from_utf8_lossy(&response);
     assert_eq!(
@@ -124,6 +126,7 @@ async fn malformed_bodies_are_4xx_never_5xx() {
         .send()
         .await
         .unwrap();
+    // DECISIVE(malformed_bodies_are_4xx_never_5xx)
     assert_eq!(
         r.status().as_u16(),
         422,

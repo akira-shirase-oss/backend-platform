@@ -41,6 +41,7 @@ async fn protected_routes_refuse_anonymous_requests() {
             .unwrap();
         let status = r.status().as_u16();
         if method == "GET" {
+            // DECISIVE(protected_routes_refuse_anonymous_requests)
             assert_eq!(status, 401, "{method} {path}");
         } else {
             assert!((400..500).contains(&status), "{method} {path} → {status}");
@@ -59,6 +60,7 @@ async fn garbage_sessions_and_tokens_are_refused() {
             .send()
             .await
             .unwrap();
+        // DECISIVE(garbage_sessions_and_tokens_are_refused)
         assert_eq!(r.status().as_u16(), 401, "cookie {cookie:?}");
     }
     for token in ["st_", "st_garbage", "notatoken", "st_ almost right"] {
@@ -93,6 +95,7 @@ async fn public_routes_stay_strict() {
         .send()
         .await
         .unwrap();
+    // DECISIVE(public_routes_stay_strict)
     assert_eq!(r.status().as_u16(), 403);
     // Verify with a made-up token is refused.
     let r = client
@@ -130,6 +133,7 @@ async fn duplicate_session_cookies_are_refused() {
             .send()
             .await
             .unwrap();
+        // DECISIVE(duplicate_session_cookies_are_refused)
         assert_eq!(r.status().as_u16(), 401, "cookie {cookie:?}");
     }
     // HTTP/2 may split Cookie across two header lines; the rule still applies.
@@ -203,6 +207,7 @@ async fn duplicate_authorization_headers_are_refused_in_either_order() {
             Duration::from_secs(5),
         )
         .await;
+        // DECISIVE(duplicate_authorization_headers_are_refused_in_either_order)
         assert_eq!(raw_status(&res), 401, "{label}: {res:?}");
     }
     // A malformed Authorization header must not fall back to a valid session cookie.
@@ -238,6 +243,7 @@ async fn cross_origin_cookie_posts_are_refused() {
         .send()
         .await
         .unwrap();
+    // DECISIVE(cross_origin_cookie_posts_are_refused)
     assert_eq!(r.status().as_u16(), 403, "cross-origin post ran");
     // The kit's own origin and no origin at all (a non-browser client) still work.
     let mut real_ids = Vec::new();
@@ -309,6 +315,7 @@ async fn a_product_post_is_csrf_guarded_too() {
         .send()
         .await
         .unwrap();
+    // DECISIVE(a_product_post_is_csrf_guarded_too)
     assert_eq!(
         forged.status().as_u16(),
         403,
@@ -322,4 +329,57 @@ async fn a_product_post_is_csrf_guarded_too() {
         .await
         .unwrap();
     assert_eq!(real.status().as_u16(), 200, "the product write was refused");
+}
+
+/// An Origin the guard cannot even read as text is refused, never treated as
+/// absent: obs-text bytes are legal in a header value, so a foreign origin can
+/// arrive in bytes — `to_str` fails and the answer must still be 403.
+#[tokio::test]
+async fn an_origin_that_is_not_text_is_refused() {
+    let s = spawn().await;
+    let session = s.verified_session("csrf-bytes@example.test").await;
+    let client = reqwest::Client::new();
+    let opaque = reqwest::header::HeaderValue::from_bytes(b"https://\x80").unwrap();
+    let r = client
+        .post(s.url("/v1/workspaces"))
+        .header("cookie", format!("starter_session={session}"))
+        .header("origin", opaque)
+        .json(&json!({ "name": "forged" }))
+        .send()
+        .await
+        .unwrap();
+    // DECISIVE(an_origin_that_is_not_text_is_refused)
+    assert_eq!(r.status().as_u16(), 403, "an unreadable origin ran");
+}
+
+/// The guard is a `.layer` over the whole app — fallback included. A cookie post
+/// to a path no route owns still meets the guard before the router: a foreign
+/// Origin must answer 403, never fall through to an unguarded 404.
+#[tokio::test]
+async fn a_cookie_post_to_an_unknown_path_is_still_csrf_guarded() {
+    let s = spawn().await;
+    let session = s.verified_session("csrf-fallback@example.test").await;
+    let client = reqwest::Client::new();
+    let r = client
+        .post(s.url("/definitely-not-a-route"))
+        .header("cookie", format!("starter_session={session}"))
+        .header("origin", "https://evil.example")
+        .json(&json!({}))
+        .send()
+        .await
+        .unwrap();
+    // DECISIVE(a_cookie_post_to_an_unknown_path_is_still_csrf_guarded)
+    assert_eq!(
+        r.status().as_u16(),
+        403,
+        "the fallback answered a foreign cookie post"
+    );
+    // Control: without a foreign origin the fallback's own answer shows through.
+    let r = client
+        .post(s.url("/definitely-not-a-route"))
+        .header("cookie", format!("starter_session={session}"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status().as_u16(), 404);
 }

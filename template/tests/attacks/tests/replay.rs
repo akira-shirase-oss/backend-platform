@@ -27,6 +27,7 @@ async fn an_invite_is_spent_once() {
         if i == 0 {
             assert_eq!(r.status().as_u16(), 201);
         } else {
+            // DECISIVE(an_invite_is_spent_once)
             assert_eq!(r.status().as_u16(), 403, "invite replayed");
         }
     }
@@ -64,6 +65,7 @@ async fn a_verify_token_cannot_be_replayed() {
         .send()
         .await
         .unwrap();
+    // DECISIVE(a_verify_token_cannot_be_replayed)
     assert!(
         second.status().is_client_error(),
         "verify token replayed → {}",
@@ -126,6 +128,7 @@ async fn a_reset_token_is_spent_once() {
         .send()
         .await
         .unwrap();
+    // DECISIVE(a_reset_token_is_spent_once)
     assert!(
         replayed.status().is_client_error(),
         "reset token replayed → {}",
@@ -195,6 +198,7 @@ async fn an_expired_reset_token_is_refused() {
         .send()
         .await
         .unwrap();
+    // DECISIVE(an_expired_reset_token_is_refused)
     assert!(
         expired.status().is_client_error(),
         "expired reset token accepted → {}",
@@ -230,6 +234,7 @@ async fn a_signed_out_session_is_dead() {
         .send()
         .await
         .unwrap();
+    // DECISIVE(a_signed_out_session_is_dead)
     assert_eq!(r.status().as_u16(), 401, "dead session reused");
 }
 
@@ -249,6 +254,7 @@ async fn a_duplicate_signup_is_refused_without_disclosure() {
         .send()
         .await
         .unwrap();
+    // DECISIVE(a_duplicate_signup_is_refused_without_disclosure)
     assert!(r.status().is_client_error(), "duplicate signup accepted");
     // The session cookie from the FIRST account still works — replay did not corrupt it.
     let me = client
@@ -290,6 +296,7 @@ async fn sign_in_does_not_disclose_which_side_failed() {
             body["error"]["message"].clone(),
         ));
     }
+    // DECISIVE(sign_in_does_not_disclose_which_side_failed)
     assert_eq!(
         replies[0], replies[1],
         "unknown address vs wrong password differ: {replies:?}"
@@ -316,6 +323,7 @@ async fn an_email_with_header_injection_is_refused() {
             ("/v1/password-reset", json!({ "email": evil })),
         ] {
             let r = client.post(s.url(route)).json(&body).send().await.unwrap();
+            // DECISIVE(an_email_with_header_injection_is_refused)
             assert!(
                 r.status().is_client_error(),
                 "{route} accepted {evil:?} → {}",
@@ -387,6 +395,7 @@ async fn every_sign_in_rotates_the_session_id() {
             .unwrap();
         assert_eq!(r.status().as_u16(), 200);
         let id = common::cookie_value(r.headers(), "starter_session").unwrap();
+        // DECISIVE(every_sign_in_rotates_the_session_id)
         assert!(ids.insert(id), "a session id was issued twice");
     }
 }

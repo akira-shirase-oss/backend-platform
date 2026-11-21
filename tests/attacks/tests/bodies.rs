@@ -29,6 +29,7 @@ async fn a_body_past_the_limit_is_413_whether_declared_or_streamed() {
         .send()
         .await
         .unwrap();
+    // DECISIVE(a_body_past_the_limit_is_413_whether_declared_or_streamed)
     assert_eq!(r.status().as_u16(), 413);
 
     // Streamed: chunked encoding, limit crossed mid-body (server must cut it).
@@ -87,6 +88,7 @@ async fn a_slow_dribbled_body_times_out_without_taking_the_server_down() {
     // the close — a timeout here means the connection was held open forever.
     let read =
         tokio::time::timeout(Duration::from_secs(5), stream.read_to_end(&mut response)).await;
+    // DECISIVE(a_slow_dribbled_body_times_out_without_taking_the_server_down)
     assert!(read.is_ok(), "server held the slow connection open");
     let text = String::from_utf8_lossy(&response);
     assert_eq!(
@@ -123,6 +125,7 @@ async fn malformed_json_and_wrong_content_type_are_4xx_never_5xx() {
             .await
             .unwrap();
         let status = r.status().as_u16();
+        // DECISIVE(malformed_json_and_wrong_content_type_are_4xx_never_5xx)
         assert!((400..500).contains(&status), "{ctype} {body:?} → {status}");
     }
     // Structurally valid JSON with an unknown field is refused, not silently dropped.

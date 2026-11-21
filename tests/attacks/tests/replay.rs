@@ -38,6 +38,7 @@ async fn the_same_key_replays_the_same_operation() {
     assert_eq!(first["replayed"], false);
 
     let second = put(&s, &client, "delivery-1", desired).await;
+    // DECISIVE(the_same_key_replays_the_same_operation)
     assert_eq!(second.status().as_u16(), 202);
     let second: Value = second.json().await.unwrap();
     assert_eq!(second["replayed"], true, "replay was not flagged: {second}");
@@ -53,6 +54,7 @@ async fn the_same_key_with_a_different_payload_is_refused() {
     assert_eq!(first.status().as_u16(), 202);
 
     let second = put(&s, &client, "delivery-2", json!({ "databases": ["b"] })).await;
+    // DECISIVE(the_same_key_with_a_different_payload_is_refused)
     assert!(
         second.status().is_client_error(),
         "key reuse with a different payload → {}",
@@ -90,6 +92,7 @@ async fn malformed_idempotency_keys_are_refused() {
             .send()
             .await
             .unwrap();
+        // DECISIVE(malformed_idempotency_keys_are_refused)
         assert_eq!(r.status().as_u16(), 400, "key {key:?}");
         let body: Value = r.json().await.unwrap();
         assert!(

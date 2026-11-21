@@ -29,6 +29,7 @@ async fn the_per_address_budget_refuses_a_flood_and_says_nothing() {
             .unwrap();
         // Once the bucket is empty the answer is 429, not a different guess signal.
         if i >= 4 {
+            // DECISIVE(the_per_address_budget_refuses_a_flood_and_says_nothing)
             assert_eq!(r.status().as_u16(), 429, "attempt {i} was not throttled");
         }
     }
@@ -54,5 +55,6 @@ async fn mail_routes_share_the_per_address_budget() {
             throttled += 1;
         }
     }
+    // DECISIVE(mail_routes_share_the_per_address_budget)
     assert!(throttled > 0, "password-reset flood was never throttled");
 }

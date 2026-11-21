@@ -27,6 +27,7 @@ async fn no_authorization_header_is_refused_on_every_protected_route() {
                 .send()
                 .await
                 .unwrap();
+            // DECISIVE(no_authorization_header_is_refused_on_every_protected_route)
             assert_eq!(r.status().as_u16(), 401, "{method} {path}");
         }
     }
@@ -53,6 +54,7 @@ async fn malformed_bearer_headers_are_refused() {
             .send()
             .await
             .unwrap();
+        // DECISIVE(malformed_bearer_headers_are_refused)
         assert_eq!(r.status().as_u16(), 401, "header {case:?}");
     }
     // Control: the real token reaches the handler.
@@ -69,6 +71,7 @@ async fn a_token_in_the_query_string_is_not_authentication() {
         .send()
         .await
         .unwrap();
+    // DECISIVE(a_token_in_the_query_string_is_not_authentication)
     assert_eq!(r.status().as_u16(), 401);
 }
 
@@ -89,6 +92,7 @@ async fn duplicated_authorization_headers_are_refused() {
             Duration::from_secs(3),
         )
         .await;
+        // DECISIVE(duplicated_authorization_headers_are_refused)
         assert_eq!(raw_status(&out), 401, "{lines:?}");
     }
 }
@@ -110,6 +114,7 @@ async fn empty_and_control_byte_authorization_values_are_refused() {
         )
         .await;
         let status = raw_status(&out);
+        // DECISIVE(empty_and_control_byte_authorization_values_are_refused)
         assert!(
             status == 400 || status == 401 || status == 431,
             "{value:?} → {out:?}"
@@ -124,5 +129,6 @@ async fn health_and_readiness_stay_open_but_reveal_nothing() {
     let livez = client.get(s.url("/livez")).send().await.unwrap();
     assert_eq!(livez.status().as_u16(), 200);
     let body = livez.text().await.unwrap();
+    // DECISIVE(health_and_readiness_stay_open_but_reveal_nothing)
     assert!(body.len() < 256, "livez leaks too much: {body:?}");
 }

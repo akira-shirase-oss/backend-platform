@@ -40,31 +40,64 @@ if [ -n "$(git status --porcelain -- .)" ]; then
   exit 1
 fi
 
-# Both scratch copies come from `git archive HEAD`, so an editor save mid-run
-# cannot leak in. The scratch path is FIXED: env!("CARGO_MANIFEST_DIR") bakes
-# the manifest dir into test binaries and tar-preserved mtimes let cargo reuse
-# a binary built for a since-deleted dir — the corpus read then panics with a
-# phantom NotFound. Two concurrent runs would clobber that fixed path; the
-# mkdir lock is the atomic exclusion.
-mkdir -p target
-lock="$here/target/prove-attacks.lock"
-if ! mkdir "$lock" 2>/dev/null; then
-  echo "error: another prove-attacks run holds $lock (a crashed run leaves it: rm -rf it)" >&2
-  exit 1
+if [ -z "${ATTACKS_INNER:-}" ]; then
+  # One machine-wide run at a time: parallel proofs race the loopback ephemeral
+  # range (this box's 49152-65535 covers every product band) and the fixed
+  # scratch path. The lock records its holder's pid; a dead holder's is
+  # reclaimed. Both scratch copies come from `git archive HEAD` — and the proof
+  # then re-executes ITS OWN committed copy from the pristine tree, so a
+  # live-tree edit to this script mid-run cannot skew the table or the verdicts.
+  lockdir="${TMPDIR:-/tmp}/prove-attacks.lock.d"
+  for _ in $(seq 1 100); do
+    if mkdir "$lockdir" 2>/dev/null; then break; fi
+    holder="$(cat "$lockdir/pid" 2>/dev/null || true)"
+    if [ -n "$holder" ] && ! kill -0 "$holder" 2>/dev/null; then rm -rf "$lockdir"; continue; fi
+    sleep 0.2
+  done
+  [ -d "$lockdir" ] || {
+    echo "error: another prove-attacks run (pid ${holder:-?}) holds $lockdir" >&2
+    exit 1
+  }
+  printf '%s\n' "$$" >"$lockdir/pid"
+  mkdir -p target
+  work="$here/target/prove-attacks-work"
+  pristine="$here/target/prove-attacks-pristine"
+  rm -rf "$work" "$pristine"
+  mkdir "$work" "$pristine"
+  # exec replaces this shell, so this trap only fires if the archive fails.
+  trap 'rm -rf "$work" "$pristine" "$lockdir"' EXIT
+  commit="$(git rev-parse HEAD)"
+  git archive "$commit" | tar -x -C "$work"
+  git archive "$commit" | tar -x -C "$pristine"
+  if [ ! -f "$pristine/scripts/prove-attacks.sh" ]; then
+    echo "error: the archived commit carries no scripts/prove-attacks.sh" >&2
+    exit 1
+  fi
+  export ATTACKS_INNER=1 ATTACKS_WORK="$work" ATTACKS_PRISTINE="$pristine" \
+    ATTACKS_COMMIT="$commit" ATTACKS_LOCKDIR="$lockdir" \
+    ATTACKS_TARGET="$here/target/prove-attacks" ATTACKS_LIVE="$here"
+  case "$out" in
+    "") ;;
+    /*) ;;
+    *) out="$here/$out" ;;
+  esac
+  exec bash "$pristine/scripts/prove-attacks.sh" ${out:+--out "$out"}
 fi
-work="$here/target/prove-attacks-work"
-pristine="$here/target/prove-attacks-pristine"
-rm -rf "$work" "$pristine"
-mkdir "$work" "$pristine"
-trap 'rm -rf "$work" "$pristine" "$lock"' EXIT
-commit="$(git rev-parse HEAD)"
-git archive "$commit" | tar -x -C "$work"
-git archive "$commit" | tar -x -C "$pristine"
-export CARGO_TARGET_DIR="$here/target/prove-attacks"
+
+# --- inner: the committed script, run over the archived pristine tree ---
+work="$ATTACKS_WORK"
+pristine="$ATTACKS_PRISTINE"
+commit="$ATTACKS_COMMIT"
+lockdir="$ATTACKS_LOCKDIR"
+trap 'rm -rf "$work" "$pristine" "$lockdir"' EXIT
+export CARGO_TARGET_DIR="$ATTACKS_TARGET"
 # Binaries baked by earlier runs hold a since-renamed manifest path; start fresh.
-rm -rf "$here/target/prove-attacks"
-# A caller's RUSTFLAGS (a sanitizer, -D warnings) would skew the proof build.
+rm -rf "$CARGO_TARGET_DIR"
+# A caller's RUSTFLAGS (a sanitizer, -D warnings) would skew the proof build;
+# CARGO_ENCODED_RUSTFLAGS overrides it, so it is cleared too.
 export RUSTFLAGS=
+unset CARGO_ENCODED_RUSTFLAGS
+bounded_seq=0
 
 # name|file|pattern<TAB>replacement (a Python regex, applied near the marker)|package|test target|test
 mutations=(
@@ -76,7 +109,9 @@ mutations=(
   "token-lookup|crates/starter-accounts/src/lib.rs|ok_or\(AccountsError::Unauthenticated\)\?;	unwrap_or((Uuid::nil(), Uuid::nil()));|starter-attacks|auth_bypass|garbage_sessions_and_tokens_are_refused"
   "origin-check|crates/starter-accounts/src/routes.rs|!= Some\(accounts\.settings\(\)\.public_url\.as_str\(\)\)	== Some(accounts.settings().public_url.as_str())|starter-attacks|auth_bypass|cross_origin_cookie_posts_are_refused"
   "origin-check|crates/starter-accounts/src/routes.rs|!= Some\(accounts\.settings\(\)\.public_url\.as_str\(\)\)	== Some(accounts.settings().public_url.as_str())|starter-attacks|auth_bypass|a_product_post_is_csrf_guarded_too"
+  "origin-check|crates/starter-accounts/src/routes.rs|!= Some\(accounts\.settings\(\)\.public_url\.as_str\(\)\)	== Some(accounts.settings().public_url.as_str())|starter-attacks|auth_bypass|an_origin_that_is_not_text_is_refused"
   "csrf-v1|crates/starter-server/src/lib.rs|let router = router\.layer\(csrf\);	let _ = router.clone().layer(csrf);|starter-attacks|auth_bypass|a_product_post_is_csrf_guarded_too"
+  "csrf-v1|crates/starter-server/src/lib.rs|let router = router\.layer\(csrf\);	let _ = router.clone().layer(csrf);|starter-attacks|auth_bypass|a_cookie_post_to_an_unknown_path_is_still_csrf_guarded"
   # --- bodies ---
   "body-limit|crates/starter-http/src/stack.rs|limits\.max_body_bytes	usize::MAX|starter-attacks|bodies|a_body_past_the_limit_is_413_whether_declared_or_streamed"
   "request-timeout|crates/starter-http/src/stack.rs|limits\.request_timeout,	Duration::from_secs(3600),|starter-attacks|bodies|a_slow_dribbled_body_times_out_and_the_server_stays_up"
@@ -133,7 +168,7 @@ EXEMPTIONS=(
 )
 
 # Every marker in the source has at least one mutation, and every mutation a marker.
-found="$(grep -rhoE 'ATTACK\([a-z0-9-]+\)' crates/*/src | sed 's/ATTACK(\(.*\))/\1/' | sort -u)"
+found="$(grep -rhoE 'ATTACK\([a-z0-9-]+\)' "$pristine"/crates/*/src | sed 's/ATTACK(\(.*\))/\1/' | sort -u)"
 defined="$(printf '%s\n' "${mutations[@]}" | cut -d'|' -f1 | sort -u)"
 if [ "$found" != "$defined" ]; then
   echo "error: markers and mutations differ:" >&2
@@ -141,15 +176,19 @@ if [ "$found" != "$defined" ]; then
   exit 1
 fi
 
-# Every attack test is named in the table — a test that guards nothing cannot land.
+# Every attack test is named in the table — a test that guards nothing cannot
+# land. Discovery walks the whole tests/ tree (submodules included) and counts
+# #[test], #[tokio::test] and #[sqlx::test]; the shared common/ dir is helpers.
 python3 -I - "$pristine/tests/attacks/tests" <<'PY' > "$work/attack-tests"
 import re, sys, os
-for name in sorted(os.listdir(sys.argv[1])):
-    if name == "common" or not name.endswith(".rs"):
-        continue
-    src = open(os.path.join(sys.argv[1], name)).read()
-    for m in re.finditer(r'#(?:\[(?:tokio::)?test)[^\]]*\]\s*(?:#\[[^\]]*\]\s*)*(?:async\s+)?fn\s+([a-z_0-9]+)', src):
-        print(m.group(1))
+for root, dirs, files in os.walk(sys.argv[1]):
+    dirs[:] = [d for d in dirs if d != "common"]
+    for name in sorted(files):
+        if not name.endswith(".rs"):
+            continue
+        src = open(os.path.join(root, name)).read()
+        for m in re.finditer(r'#(?:\[(?:(?:tokio|sqlx)::)?test)[^\]]*\]\s*(?:#\[[^\]]*\]\s*)*(?:async\s+)?fn\s+([a-z_0-9]+)', src):
+            print(m.group(1))
 PY
 covered="$(printf '%s\n' "${mutations[@]}" | cut -d'|' -f6 | sort -u)"
 exempted="$(printf '%s\n' "${EXEMPTIONS[@]}" | cut -d'|' -f1 | sort -u)"
@@ -204,13 +243,29 @@ bounded() {
     return
   fi
   set -m
-  "$@" &
-  local pid=$!
-  ( sleep "$limit"; kill -KILL "-$pid" 2>/dev/null ) &
+  bounded_seq=$((bounded_seq + 1))
+  local rcf="$work/.bounded-$bounded_seq.rc" flag="$work/.bounded-$bounded_seq.flag"
+  rm -f "$rcf" "$flag"
+  # The watchdog writes a flag file instead of signalling a child it waits on:
+  # a sleep inside $(bounded …) would otherwise hold the caller's pipe open and
+  # park every row for the full limit. Its output is discarded the same way.
+  ( sleep "$limit"; : >"$flag" ) >/dev/null 2>&1 &
   local dog=$!
-  wait "$pid" 2>/dev/null
-  local rc=$?
-  kill "$dog" 2>/dev/null; wait "$dog" 2>/dev/null
+  ( "$@"; printf '%s' "$?" >"$rcf" ) &
+  local pid=$!
+  while [ ! -f "$rcf" ] && [ ! -f "$flag" ]; do sleep 0.1; done
+  local rc
+  if [ -f "$flag" ] && [ ! -f "$rcf" ]; then
+    kill -KILL "-$pid" 2>/dev/null
+    wait "$pid" 2>/dev/null
+    rc=124
+  else
+    wait "$pid" 2>/dev/null
+    rc="$(cat "$rcf" 2>/dev/null || echo 1)"
+  fi
+  kill "$dog" 2>/dev/null
+  wait "$dog" 2>/dev/null
+  rm -f "$rcf" "$flag"
   set +m
   return "$rc"
 }
@@ -239,12 +294,27 @@ for row in "${mutations[@]}"; do
   # mid-run edit could have changed since the baseline.
   cp "$pristine/$file" "$work/$file"
   mutated_line="$(mutate "$file" "$name" "$pattern" "$replacement")"
-  # The kill must land on the protection's own decisive evidence: a panic
-  # mutant's mutated line, or the named test file for an assertion mutant —
-  # never a boot failure or a panic in a shared helper.
+  # The kill must land on the protection's own decisive LINE, matched with
+  # grep -F: a panic mutant's mutated source line, or for an assertion mutant
+  # the line after the test's DECISIVE(test) marker — resolved from the
+  # pristine copy, never the live tree. There is no file-level fallback: a
+  # panic in setup, a helper or another assertion does not count.
   case "$replacement" in
-    *.unwrap\(\)*|*panic!*) pin="$(basename -- "$file"):$mutated_line:" ;;
-    *) pin="" ;;
+    *.unwrap\(\)*|*panic!*) pin="panicked at ${file}:${mutated_line}:" ;;
+    *)
+      marker_file="$pristine/tests/attacks/tests/$target.rs"
+      [ -f "$marker_file" ] || {
+        echo "error: row $name names test $test but there is no $marker_file" >&2
+        exit 1
+      }
+      hits="$(grep -n -F "DECISIVE($test)" "$marker_file" || true)"
+      [ "$(printf '%s\n' "$hits" | grep -c .)" = "1" ] || {
+        echo "error: $marker_file must carry exactly one DECISIVE($test) marker, found:" >&2
+        printf '%s\n' "$hits" >&2
+        exit 1
+      }
+      pin="panicked at tests/attacks/tests/${target}.rs:$((${hits%%:*} + 1)):"
+      ;;
   esac
   started=$(date +%s)
   set +e
@@ -257,12 +327,7 @@ for row in "${mutations[@]}"; do
   if [ "$status" -ne 0 ] && grep -q 'test result: FAILED' <<<"$output" \
       && grep -qE "${test} [-.]+ FAILED" <<<"$output"; then
     named=1
-    if [ -n "$pin" ]; then
-      grep -qE "panicked at .*${pin}" <<<"$output" \
-        || grep -qE "panicked at .*tests/${target}\\.rs:" <<<"$output" && kills=1
-    else
-      grep -qE "panicked at .*tests/${target}\\.rs:" <<<"$output" && kills=1
-    fi
+    grep -qF "$pin" <<<"$output" && kills=1
   fi
   cp "$pristine/$file" "$work/$file"
   if [ "$kills" -eq 1 ]; then
@@ -300,7 +365,7 @@ for row in "${mutations[@]}"; do
 done
 
 if [ -n "$out" ]; then
-  dirty=false; git diff --quiet HEAD -- . 2>/dev/null || dirty=true
+  dirty=false; git -C "$ATTACKS_LIVE" diff --quiet HEAD -- . 2>/dev/null || dirty=true
   load="$(uptime | sed 's/.*load averages*: *//')"
   printf '{"proof":"attacks","commit":"%s","tree_dirty":%s,"load_average":"%s","os":"%s","results":[%s]}\n' \
     "$commit" "$dirty" "$load" "$(uname -sr)" "$(IFS=,; echo "${results[*]}")" >"$out"

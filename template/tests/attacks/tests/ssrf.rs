@@ -49,6 +49,7 @@ async fn reset_links_come_from_the_configured_url_not_the_request() {
             r.status()
         );
         let mail = s.sink.latest_to(&email).await.expect("reset mail was sent");
+        // DECISIVE(reset_links_come_from_the_configured_url_not_the_request)
         assert!(
             mail.data.contains("https://app.example.test/"),
             "mail steered by the {name} header: {}",
@@ -85,6 +86,7 @@ async fn user_controlled_fields_can_not_make_the_server_fetch() {
         ),
     ] {
         let r = client.post(s.url(path)).json(&body).send().await.unwrap();
+        // DECISIVE(user_controlled_fields_can_not_make_the_server_fetch)
         assert!(
             r.status().is_client_error() || r.status().as_u16() == 429,
             "{path} accepted {body}"

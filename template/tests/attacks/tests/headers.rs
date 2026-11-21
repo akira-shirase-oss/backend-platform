@@ -43,6 +43,7 @@ async fn xff_from_an_untrusted_peer_does_not_evasion_the_signin_budget() {
             throttled += 1;
         }
     }
+    // DECISIVE(xff_from_an_untrusted_peer_does_not_evasion_the_signin_budget)
     assert!(throttled > 0, "rotating XFF evaded the per-address budget");
 }
 
@@ -63,6 +64,7 @@ async fn from_a_trusted_proxy_only_the_rightmost_xff_entry_is_believed() {
             throttled += 1;
         }
     }
+    // DECISIVE(from_a_trusted_proxy_only_the_rightmost_xff_entry_is_believed)
     assert!(
         throttled > 0,
         "left-side forged XFF entries evaded the budget"
@@ -155,6 +157,7 @@ async fn oversized_headers_are_431() {
     let mut out = Vec::new();
     let _ = tokio::time::timeout(Duration::from_secs(5), stream.read_to_end(&mut out)).await;
     let reply = String::from_utf8_lossy(&out);
+    // DECISIVE(oversized_headers_are_431)
     assert!(
         reply.starts_with("HTTP/1.1 431") || reply.is_empty(),
         "oversized head: {reply:?}"
@@ -191,5 +194,6 @@ async fn dribbled_headers_are_closed_by_the_deadline() {
             break;
         }
     }
+    // DECISIVE(dribbled_headers_are_closed_by_the_deadline)
     assert!(closed, "a head dribbled for 30 s was never cut");
 }

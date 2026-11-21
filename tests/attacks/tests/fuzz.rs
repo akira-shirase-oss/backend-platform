@@ -220,6 +220,7 @@ async fn request_bodies_through_the_router_never_5xx() {
                 .send()
                 .await
                 .unwrap();
+            // DECISIVE(request_bodies_through_the_router_never_5xx)
             assert!(
                 !r.status().is_server_error(),
                 "{method} {path} on generated body {i} → {}; bytes (hex): {}",
@@ -256,6 +257,7 @@ fn config_refuses_garbage_values() {
             (n == "BP_ADMIN_TOKEN").then(|| v.clone())
         })
         .unwrap_err();
+        // DECISIVE(config_refuses_garbage_values)
         assert!(
             err.contains("BP_ADMIN_TOKEN"),
             "BP_ADMIN_TOKEN={bad:?} not refused by name: {err}"

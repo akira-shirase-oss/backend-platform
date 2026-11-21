@@ -46,6 +46,9 @@ tower = { version = "0.5.3", features = ["util"] }
 tower-http = { version = "0.7.1", features = ["request-id", "trace", "timeout", "limit", "catch-panic", "sensitive-headers"] }
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter", "json"] }
+# The Origin round-trip in starter-server's public-URL check: only an origin a
+# browser would serialize verbatim is accepted.
+url = "2.5.8"
 uuid = { version = "1.29", features = ["v4", "v7", "serde"] }
 
 [workspace.lints.rust]

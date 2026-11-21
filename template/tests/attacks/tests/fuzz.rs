@@ -245,6 +245,7 @@ fn config_refuses_garbage_values_and_names_the_variable() {
         let mut map = BTreeMap::new();
         map.insert(var.to_owned(), bad.to_owned());
         let err = config::Config::load(&MapSource(map)).unwrap_err();
+        // DECISIVE(config_refuses_garbage_values_and_names_the_variable)
         assert!(
             err.iter().any(|e| e.contains(var)),
             "{var}={bad}: not refused by name — {err:?}"
