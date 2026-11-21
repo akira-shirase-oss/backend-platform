@@ -241,9 +241,9 @@ for row in "${mutations[@]}"; do
     named=1
     if [ -n "$pin" ]; then
       grep -qF "panicked at ${pin}" <<<"$output" \
-        || grep -qF "panicked at tests/$target.rs:" <<<"$output" && kills=1
+        || grep -qE "panicked at .*tests/${target}\\.rs:" <<<"$output" && kills=1
     else
-      grep -qF "panicked at tests/$target.rs:" <<<"$output" && kills=1
+      grep -qE "panicked at .*tests/${target}\\.rs:" <<<"$output" && kills=1
     fi
   fi
   cp "$pristine/$file" "$work/$file"
