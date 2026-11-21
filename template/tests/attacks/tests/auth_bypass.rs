@@ -6,7 +6,9 @@
 
 mod common;
 
-use common::spawn;
+use std::time::Duration;
+
+use common::{body_json, raw, raw_status, spawn};
 use serde_json::json;
 
 #[tokio::test]
@@ -98,4 +100,69 @@ async fn public_routes_stay_strict() {
         .await
         .unwrap();
     assert!(r.status().is_client_error());
+}
+
+#[tokio::test]
+async fn duplicate_authorization_headers_are_refused_in_either_order() {
+    let s = spawn().await;
+    let client = reqwest::Client::new();
+    let alice = s.verified_session("dave@example.test").await;
+    // A real API token: without the refusal, `[valid, junk]` would authenticate.
+    let ws = client
+        .post(s.url("/v1/workspaces"))
+        .header("cookie", format!("starter_session={alice}"))
+        .json(&json!({ "name": "team" }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(ws.status().as_u16(), 201);
+    let ws_id = body_json(ws).await["id"].as_str().unwrap().to_owned();
+    let created = client
+        .post(s.url(&format!("/v1/workspaces/{ws_id}/tokens")))
+        .header("cookie", format!("starter_session={alice}"))
+        .json(&json!({ "name": "ci" }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(created.status().as_u16(), 201);
+    let token = body_json(created).await["token"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+
+    // Exactly one Authorization header is allowed; two values are ambiguous.
+    for (label, lines) in [
+        (
+            "valid then junk",
+            format!("Authorization: Bearer {token}\r\nAuthorization: Bearer junkjunk\r\n"),
+        ),
+        (
+            "junk then valid",
+            format!("Authorization: Bearer junkjunk\r\nAuthorization: Bearer {token}\r\n"),
+        ),
+        (
+            "empty then valid",
+            format!("Authorization:\r\nAuthorization: Bearer {token}\r\n"),
+        ),
+    ] {
+        let res = raw(
+            &s,
+            format!("GET /v1/workspaces/{ws_id} HTTP/1.1\r\nHost: x\r\n{lines}\r\n").as_bytes(),
+            Duration::from_secs(5),
+        )
+        .await;
+        assert_eq!(raw_status(&res), 401, "{label}: {res:?}");
+    }
+    // A malformed Authorization header must not fall back to a valid session cookie.
+    let res = raw(
+        &s,
+        format!(
+            "GET /v1/workspaces/{ws_id} HTTP/1.1\r\nHost: x\r\n\
+             Authorization: Bearer junkjunk\r\nCookie: starter_session={alice}\r\n\r\n"
+        )
+        .as_bytes(),
+        Duration::from_secs(5),
+    )
+    .await;
+    assert_eq!(raw_status(&res), 401, "header+cookie: {res:?}");
 }

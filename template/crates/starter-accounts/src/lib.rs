@@ -233,7 +233,13 @@ impl Accounts {
 
     /// The caller: an `Authorization: Bearer` API token, else the session cookie.
     pub async fn principal(&self, headers: &HeaderMap) -> Result<Principal, AccountsError> {
-        if let Some(value) = headers.get(header::AUTHORIZATION) {
+        let mut authorization = headers.get_all(header::AUTHORIZATION).iter();
+        if let Some(value) = authorization.next() {
+            // Two `Authorization` headers are ambiguous: refuse outright rather than
+            // silently pick a winner (the platform's bearer_token does the same).
+            if authorization.next().is_some() {
+                return Err(AccountsError::Unauthenticated);
+            }
             let token = value
                 .to_str()
                 .ok()
