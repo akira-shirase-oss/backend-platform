@@ -34,13 +34,18 @@ if [ -n "$(git status --porcelain -- .)" ]; then
   exit 1
 fi
 
-# The scratch copy lives under target/ (tar-excluded, gitignored): tmp
-# reapers have deleted a copy mid-run before.
+# The scratch copy lives under target/ (tar-excluded, gitignored), at a FIXED
+# path: env!("CARGO_MANIFEST_DIR") bakes the manifest dir into test binaries, and
+# tar-preserved mtimes let cargo reuse a binary built for a since-deleted dir —
+# the corpus read then panics with a phantom NotFound. One path keeps env! valid.
 mkdir -p target
-work="$(mktemp -d "$here/target/prove-attacks-work.XXXXXX")"
+work="$here/target/prove-attacks-work"
+rm -rf "$work"
 trap 'rm -rf "$work"' EXIT
 tar --exclude ./target --exclude ./.git -cf - . | tar -xf - -C "$work"
 export CARGO_TARGET_DIR="$here/target/prove-attacks"
+# Binaries baked by earlier runs hold a since-renamed manifest path; start fresh.
+rm -rf "$here/target/prove-attacks"
 
 # name|file|pattern<TAB>replacement (a Python regex, applied near the marker)|package|test target|test
 mutations=(
