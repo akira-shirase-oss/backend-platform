@@ -16,7 +16,7 @@
 //! grant updates the manifest in the same commit (`starterctl digests` prints the values
 //! on a freshly migrated database).
 
-use sqlx::PgPool;
+use sqlx::{PgConnection, PgPool};
 use thiserror::Error;
 
 use crate::DbError;
@@ -58,8 +58,15 @@ impl From<sqlx::Error> for Refusal {
 
 /// What the manifest finds wrong with the database behind `pool` (empty when protected).
 pub async fn protection_problems(pool: &PgPool) -> Result<Vec<String>, DbError> {
+    let mut conn = pool.acquire().await?;
+    protection_problems_conn(&mut conn).await
+}
+
+/// [`protection_problems`] on an existing connection — inside a transaction a weakened
+/// state is inspected without ever committing it.
+pub async fn protection_problems_conn(conn: &mut PgConnection) -> Result<Vec<String>, DbError> {
     Ok(sqlx::query_scalar(sqlx::AssertSqlSafe(PROTECTIONS))
-        .fetch_all(pool)
+        .fetch_all(&mut *conn)
         .await?)
 }
 
@@ -79,6 +86,13 @@ struct RoleFacts {
 
 /// Checks the role `pool` connects as, then the manifest.
 pub async fn check_runtime(pool: &PgPool) -> Result<(), Refusal> {
+    let mut conn = pool.acquire().await?;
+    check_runtime_conn(&mut conn).await
+}
+
+/// [`check_runtime`] on an existing connection — inside a transaction the role is
+/// changed with `SET LOCAL ROLE`, so a weakening is inspected and then rolled back.
+pub async fn check_runtime_conn(conn: &mut PgConnection) -> Result<(), Refusal> {
     let facts = sqlx::query_as::<_, RoleFacts>(
         "SELECT current_user::text AS role,
                 r.rolsuper AS superuser, r.rolcreaterole AS createrole,
@@ -90,7 +104,7 @@ pub async fn check_runtime(pool: &PgPool) -> Result<(), Refusal> {
            FROM pg_roles r WHERE r.rolname = current_user",
     )
     .bind(OWNER_ROLE)
-    .fetch_one(pool)
+    .fetch_one(&mut *conn)
     .await?;
     let role = facts.role.clone();
     if facts.superuser {
@@ -108,7 +122,7 @@ pub async fn check_runtime(pool: &PgPool) -> Result<(), Refusal> {
             return Err(Refusal::TooBroad { role, what });
         }
     }
-    let problems = protection_problems(pool).await?;
+    let problems = protection_problems_conn(conn).await?;
     if problems.is_empty() {
         Ok(())
     } else {

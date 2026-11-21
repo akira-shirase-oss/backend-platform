@@ -30,7 +30,15 @@ pub struct Instance {
     /// `http://127.0.0.1:<port>` — no path.
     pub base: String,
     _db: TestDb,
-    _server: JoinHandle<()>,
+    server: JoinHandle<()>,
+}
+
+impl Drop for Instance {
+    fn drop(&mut self) {
+        // A dropped JoinHandle only detaches: abort the server so its pool closes and
+        // the database's own Drop can drop it (FORCE) without waiting on stale clients.
+        self.server.abort();
+    }
 }
 
 impl Instance {
@@ -70,7 +78,7 @@ pub async fn spawn_with(config: Config) -> Instance {
     Instance {
         base: format!("http://{addr}"),
         _db: db,
-        _server: server,
+        server,
     }
 }
 

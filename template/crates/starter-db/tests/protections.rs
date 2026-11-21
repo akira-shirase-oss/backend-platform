@@ -2,7 +2,9 @@
 //! whose protections were weakened in any one way — each weakening alone, on a fresh copy
 //! (Payment Sandbox D-058: names were not enough, so bodies and definitions are pinned too).
 
-use starter_db::guard::{Refusal, check_runtime, protection_problems};
+use sqlx::{AssertSqlSafe, Executor};
+use starter_db::guard::{Refusal, check_runtime, check_runtime_conn, protection_problems};
+use starter_db::roles::{OWNER_ROLE, RUNTIME_ROLE};
 use starter_db::testing::{Role, TestDb};
 
 #[tokio::test]
@@ -166,17 +168,33 @@ const WEAKENINGS: [(&str, Role, &str, &str); 13] = [
 
 #[tokio::test]
 async fn every_weakening_alone_is_refused_at_startup() {
+    // One database, one admin pool, one transaction per weakening: the session user is
+    // the superuser, so SET LOCAL ROLE reaches both the weakening's role and the runtime
+    // role — the check inspects the weakened catalog inside the transaction and the
+    // rollback leaves the database untouched. One create+migrate instead of thirteen.
+    let db = TestDb::new().await;
+    let admin = db.connect_as(Role::Admin).await;
+    let admin_name: String = sqlx::query_scalar("SELECT current_user::text")
+        .fetch_one(&admin)
+        .await
+        .unwrap();
     for (what, role, sql, expected) in WEAKENINGS {
-        let db = TestDb::new().await;
-        let admin_name: String = sqlx::query_scalar("SELECT current_user::text")
-            .fetch_one(&db.connect_as(Role::Admin).await)
+        let mut tx = admin.begin().await.unwrap();
+        if role == Role::Owner {
+            tx.execute(AssertSqlSafe(format!("SET LOCAL ROLE {OWNER_ROLE}")))
+                .await
+                .unwrap();
+        }
+        tx.execute(AssertSqlSafe(
+            sql.replace("{db}", db.name())
+                .replace("{admin}", &admin_name),
+        ))
+        .await
+        .unwrap_or_else(|e| panic!("{what}: {e}"));
+        tx.execute(AssertSqlSafe(format!("SET LOCAL ROLE {RUNTIME_ROLE}")))
             .await
             .unwrap();
-        let sql = sql
-            .replace("{db}", db.name())
-            .replace("{admin}", &admin_name);
-        db.exec_as(role, &sql).await;
-        let refused = check_runtime(&db.pool).await;
+        let refused = check_runtime_conn(&mut tx).await;
         match &refused {
             Err(Refusal::Unprotected(problems)) => assert!(
                 problems.contains(expected),
@@ -184,8 +202,10 @@ async fn every_weakening_alone_is_refused_at_startup() {
             ),
             other => panic!("{what}: not refused as unprotected: {other:?}"),
         }
-        db.cleanup().await;
+        tx.rollback().await.unwrap();
     }
+    admin.close().await;
+    db.cleanup().await;
 }
 
 #[tokio::test]

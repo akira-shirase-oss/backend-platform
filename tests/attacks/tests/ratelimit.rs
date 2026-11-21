@@ -64,10 +64,22 @@ async fn the_shed_gate_cannot_be_evaded_by_spoofed_client_headers() {
         assert_eq!(r.status().as_u16(), 503, "spoof {i} was not shed");
     }
 
-    // When the held requests die (server-side deadline), the gate recovers.
-    drop(h1);
-    drop(h2);
-    tokio::time::sleep(Duration::from_millis(1_400)).await;
-    let r = authed(&client, Method::GET, &s.url("/v1/operation-counts")).await;
-    assert_eq!(r.status().as_u16(), 200, "the gate did not recover");
+    // Dropping a JoinHandle only detaches — abort the held requests so their
+    // connections close and the gate frees its slots now, then wait on observed
+    // state instead of a fixed sleep: poll until a request is admitted again.
+    h1.abort();
+    h2.abort();
+    let deadline = std::time::Instant::now() + Duration::from_secs(10);
+    loop {
+        let r = authed(&client, Method::GET, &s.url("/v1/operation-counts")).await;
+        if r.status().as_u16() == 200 {
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the gate did not recover: {}",
+            r.status()
+        );
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
 }

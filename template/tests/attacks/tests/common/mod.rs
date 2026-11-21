@@ -38,7 +38,15 @@ pub struct Instance {
     pub sink: SmtpSink,
     /// The database (invites are seeded through it).
     pub db: TestDb,
-    _server: JoinHandle<()>,
+    server: JoinHandle<()>,
+}
+
+impl Drop for Instance {
+    fn drop(&mut self) {
+        // A dropped JoinHandle only detaches: abort the server so its pool closes and
+        // the database's own Drop can drop it (FORCE) without waiting on stale clients.
+        self.server.abort();
+    }
 }
 
 impl Instance {
@@ -149,7 +157,7 @@ pub async fn spawn_with(tune: impl FnOnce(&mut (Settings, StackLimits))) -> Inst
         base: format!("http://{addr}"),
         sink,
         db,
-        _server: server,
+        server,
     }
 }
 
