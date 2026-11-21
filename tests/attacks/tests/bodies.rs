@@ -83,12 +83,20 @@ async fn a_slow_dribbled_body_times_out_without_taking_the_server_down() {
             _ => {}
         }
     }
-    let _ = tokio::time::timeout(Duration::from_secs(2), stream.read_to_end(&mut response)).await;
+    // The server must answer and close: read_to_end finishing inside the bound is
+    // the close — a timeout here means the connection was held open forever.
+    let read =
+        tokio::time::timeout(Duration::from_secs(5), stream.read_to_end(&mut response)).await;
+    assert!(read.is_ok(), "server held the slow connection open");
     let text = String::from_utf8_lossy(&response);
-    let status = raw_status(&text);
+    assert_eq!(
+        raw_status(&text),
+        503,
+        "slow body expected a 503, got {text:?}"
+    );
     assert!(
-        status == 503 || response.is_empty(),
-        "slow body expected timeout/close, got {text:?}"
+        text.contains("\"code\":\"timeout\""),
+        "expected the timeout envelope, got {text:?}"
     );
     // The instance is still healthy — the attack consumed nothing it shouldn't.
     let client = reqwest::Client::new();
