@@ -76,7 +76,7 @@ mutations=(
   "project-id-parse|crates/platform-server/src/handlers.rs|ProjectId::parse\(raw\)\.map_err\(\x7ce\x7c ApiError::Invalid\(e\.to_string\(\)\)\)	Ok(ProjectId::parse(raw).unwrap())|platform-attacks|ssrf|a_url_shaped_project_or_operation_is_never_a_target"
   # --- tenant ---
   "project-scope|crates/platform-db/src/desired.rs|WHERE project = \\\$1	WHERE project != \$1|platform-attacks|tenant|another_projects_state_is_not_visible"
-  "operation-lookup|crates/platform-db/src/log.rs|WHERE o\.id = \\\$1	WHERE (o.id = $1 OR TRUE)|platform-attacks|tenant|operation_ids_are_not_guessable"
+  "operation-lookup|crates/platform-db/src/log.rs|WHERE o\.id = \\\$1	WHERE (o.id = \$1 OR TRUE)|platform-attacks|tenant|operation_ids_are_not_guessable"
   "no-fallback|crates/platform-server/src/lib.rs|Router::new\(\)	Router::new().fallback(get(handlers::livez))|platform-attacks|tenant|path_traversal_and_encoding_tricks_are_refused"
 )
 
