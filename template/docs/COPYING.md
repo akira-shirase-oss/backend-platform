@@ -9,14 +9,18 @@ reviewed diff (below).
 From the Backend Platform repository:
 
 ```
-scripts/copy-template.sh ../my-product myproduct            # copy and rename
-STARTER_TEST_DATABASE_URL=... scripts/copy-template.sh ../x x --verify   # and prove the copy builds and passes
+scripts/copy-template.sh ../my-product myproduct 61800-61899   # copy, rename, reserve the port band
+STARTER_TEST_DATABASE_URL=... scripts/copy-template.sh ../x x 62000-62099 --verify   # and prove the copy builds and passes
 ```
 
 The script copies `template/` without its `target/`, renames everything that names the
-template, writes `TEMPLATE_ORIGIN` with the commit it came from, and runs
-`cargo fmt --all` on the copy (the rename changes crate-name lengths, which is
-rustfmt-visible; `--verify` proves the result with `fmt --check`):
+template, writes `scripts/port-band` from the BAND argument and reserves that band in
+the platform repository's `port-bands` registry (an overlap — the platform's own
+61400-61499 included — is refused), writes `TEMPLATE_ORIGIN` with the commit it came
+from, and runs `cargo fmt --all` on the copy (the rename changes crate-name lengths,
+which is rustfmt-visible; `--verify` proves the result with `fmt --check`). The copy's
+own `scripts/check.sh` refuses the template's default band, so a hand-copied tree must
+also set `scripts/port-band` to a registered band of its own:
 
 | Template | Copy (`NAME` = `myproduct`) |
 |---|---|
@@ -31,11 +35,12 @@ rustfmt-visible; `--verify` proves the result with `fmt --check`):
 Then, by hand:
 
 1. `git init`, push, and turn on the copied CI (`.github/workflows/ci.yml`) and Dependabot.
-2. Pick the product's own port band (above Linux's ephemeral range, which ends at 60999)
-   and set it in `scripts/port-band` (the one file every port check reads): `scripts/check-ports.sh` then fails
-   any literal port outside it. Pick the product's own ports inside the band (the
-   template uses 61450 for the server, 61433 for the development database), the API-token
-   prefix (`tokens::API_TOKEN_PREFIX`, `st_`), and the `From` address.
+2. `scripts/port-band` was already written from the BAND argument and reserved in the
+   platform's `port-bands` registry — it is the one file every port check reads, and
+   `scripts/check-ports.sh` fails any literal port outside it. Pick the product's own
+   ports inside the band (the template uses 61450 for the server, 61433 for the
+   development database — shifted into the new band), the API-token prefix
+   (`tokens::API_TOKEN_PREFIX`, `st_`), and the `From` address.
 3. Any script the product adds under `scripts/` must pass `scripts/test-help.sh`'s idiom:
    `--help` prints the header comment as its explanation, and an unknown argument exits
    non-zero saying what was wrong and pointing at `--help`.

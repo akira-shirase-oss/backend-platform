@@ -47,7 +47,7 @@ for sample in 'services:\n  db:\n    image: postgres:18\n' 'steps:\n  - uses: ac
   scripts/check-pins.sh "$unpinned" >/dev/null 2>&1 || status=$?
   if [ "$status" -ne 1 ]; then
     echo "error: the pin check did not catch: $sample (exit $status)" >&2
-    rm -f "$sample" "$outofband" "$dup" 2>/dev/null || true
+    rm -f "$unpinned"
     exit 1
   fi
 done
@@ -66,7 +66,7 @@ for spec in 'ports:\n      - "%s:8000"\n|58000' 'curl http://127.0.0.1:%s/health
   scripts/check-ports.sh "$outofband" >/dev/null 2>&1 || status=$?
   if [ "$status" -ne 1 ]; then
     echo "error: the port check did not catch: $spec (exit $status)" >&2
-    rm -f "$sample" "$outofband" "$dup" 2>/dev/null || true
+    rm -f "$outofband"
     exit 1
   fi
 done

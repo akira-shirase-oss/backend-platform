@@ -59,14 +59,21 @@ for unpinned in 'services:\n  db:\n    image: postgres:18\n' 'steps:\n  - uses: 
   scripts/check-pins.sh "$sample" >/dev/null 2>&1 || status=$?
   if [ "$status" -ne 1 ]; then
     echo "error: the pin check did not catch: $unpinned (exit $status)" >&2
-    rm -f "$sample" "$outofband" "$dup" 2>/dev/null || true
+    rm -f "$sample"
     exit 1
   fi
 done
 rm -f "$sample"
 
-# The copy's port band: every port it binds stays inside it (docs/COPYING.md). The
-# out-of-band probes reach the sample file through printf %s, so this script itself
+# The copy's port band: every port it binds stays inside it (docs/COPYING.md). A copy
+# must leave the template's default band — it is the platform's own, so two copies on
+# one machine would otherwise share it. TEMPLATE_ORIGIN exists only in a copy, which
+# is how this same check lets the template itself keep the default.
+if [ -f TEMPLATE_ORIGIN ] && [ "$(cat scripts/port-band)" = "61400-61499" ]; then
+  echo "error: a copy must set its own band in scripts/port-band; 61400-61499 is the platform's (docs/COPYING.md)" >&2
+  exit 2
+fi
+# The out-of-band probes reach the sample file through printf %s, so this script itself
 # holds no offending literal for the check to flag.
 port_band="${PORT_BAND:-$(cat scripts/port-band)}"
 step "ports inside the band $port_band, and the check can fail"
@@ -79,7 +86,7 @@ for bad in "  - \"$((band_low - 1)):5432\"" 'port=8080'; do
   PORT_BAND="$port_band" scripts/check-ports.sh "$sample" >/dev/null 2>&1 || status=$?
   if [ "$status" -ne 1 ]; then
     echo "error: the port check did not catch: $bad (exit $status)" >&2
-    rm -f "$sample" "$outofband" "$dup" 2>/dev/null || true
+    rm -f "$sample"
     exit 1
   fi
 done
@@ -89,7 +96,7 @@ for n in $((band_low - 1)) $((band_high + 1)); do
   PORT_BAND="$port_band" scripts/check-ports.sh "$sample" >/dev/null 2>&1 || status=$?
   if [ "$status" -ne 1 ]; then
     echo "error: the port check did not catch a loopback port $n outside the band (exit $status)" >&2
-    rm -f "$sample" "$outofband" "$dup" 2>/dev/null || true
+    rm -f "$sample"
     exit 1
   fi
 done

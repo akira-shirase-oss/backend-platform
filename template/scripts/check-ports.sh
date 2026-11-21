@@ -69,13 +69,14 @@ for file in "${files[@]}"; do
     in_band "$port" || report "$line" "$port" "$(sed -n "${line}p" "$file")"
   done < <(grep -nE '^[[:space:]]*-[[:space:]]*"?[0-9]{2,5}:[0-9]+' "$file" | cut -d: -f1 || true)
 
-  # An unquoted mapping in flow form: `ports: [NNNN:MMMM, ...]`.
+  # An unquoted mapping in flow form: `ports: [NNNN:MMMM, ...]` — each element is
+  # caught whether it opens the list or follows a comma.
   while IFS= read -r hit; do
     [ -n "$hit" ] || continue
-    line="${hit%%:*}" port="${hit#*:[}"
-    port="${port%%:*}"
+    line="${hit%%:*}"
+    port="$(printf '%s' "${hit#*:}" | tr -d '[,[:space:]]' | cut -d: -f1)"
     in_band "$port" || report "$line" "$port" "$(sed -n "${line}p" "$file")"
-  done < <(grep -nEo '\[[0-9]{2,5}:[0-9]+\]' "$file" || true)
+  done < <(grep -nEo '(\[|,)[[:space:]]*[0-9]{2,5}:[0-9]+' "$file" || true)
 
   # A quoted mapping anywhere — the flow form `ports: ["NNNN:MMMM", ...]`.
   while IFS= read -r hit; do

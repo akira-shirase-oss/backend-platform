@@ -26,6 +26,12 @@ case "${1:-}" in
 esac
 : "${BP_TEST_DATABASE_URL:?is not set. Start the database and export its address: scripts/stack.sh up; eval \"\$(scripts/stack.sh env)\"}"
 
+# The proof is of a commit and must run inside a work tree.
+git rev-parse --is-inside-work-tree >/dev/null 2>&1 || {
+  echo "error: prove-attacks.sh must run inside a git work tree" >&2
+  exit 1
+}
+
 # The proof runs over committed state: an uncommitted or untracked file would
 # carry markers, tests or protections into the scratch copy that CI never sees.
 if [ -n "$(git status --porcelain -- .)" ]; then
@@ -34,19 +40,31 @@ if [ -n "$(git status --porcelain -- .)" ]; then
   exit 1
 fi
 
-# The scratch copy lives under target/ (tar-excluded, gitignored), at a FIXED
-# path: env!("CARGO_MANIFEST_DIR") bakes the manifest dir into test binaries, and
-# tar-preserved mtimes let cargo reuse a binary built for a since-deleted dir —
-# the corpus read then panics with a phantom NotFound. One path keeps env! valid.
+# Both scratch copies come from `git archive HEAD`, so an editor save mid-run
+# cannot leak in. The scratch path is FIXED: env!("CARGO_MANIFEST_DIR") bakes
+# the manifest dir into test binaries and tar-preserved mtimes let cargo reuse
+# a binary built for a since-deleted dir — the corpus read then panics with a
+# phantom NotFound. Two concurrent runs would clobber that fixed path; the
+# mkdir lock is the atomic exclusion.
 mkdir -p target
+lock="$here/target/prove-attacks.lock"
+if ! mkdir "$lock" 2>/dev/null; then
+  echo "error: another prove-attacks run holds $lock (a crashed run leaves it: rm -rf it)" >&2
+  exit 1
+fi
 work="$here/target/prove-attacks-work"
-rm -rf "$work"
-mkdir "$work"
-trap 'rm -rf "$work"' EXIT
-tar --exclude ./target --exclude ./.git -cf - . | tar -xf - -C "$work"
+pristine="$here/target/prove-attacks-pristine"
+rm -rf "$work" "$pristine"
+mkdir "$work" "$pristine"
+trap 'rm -rf "$work" "$pristine" "$lock"' EXIT
+commit="$(git rev-parse HEAD)"
+git archive "$commit" | tar -x -C "$work"
+git archive "$commit" | tar -x -C "$pristine"
 export CARGO_TARGET_DIR="$here/target/prove-attacks"
 # Binaries baked by earlier runs hold a since-renamed manifest path; start fresh.
 rm -rf "$here/target/prove-attacks"
+# A caller's RUSTFLAGS (a sanitizer, -D warnings) would skew the proof build.
+export RUSTFLAGS=
 
 # name|file|pattern<TAB>replacement (a Python regex, applied near the marker)|package|test target|test
 mutations=(
@@ -106,7 +124,7 @@ EXEMPTIONS=(
 )
 
 # Every attack test is named in the table — a test that guards nothing cannot land.
-python3 -I - tests/attacks/tests <<'PY' > "$work/attack-tests"
+python3 -I - "$pristine/tests/attacks/tests" <<'PY' > "$work/attack-tests"
 import re, sys, os
 for name in sorted(os.listdir(sys.argv[1])):
     if name == "common" or not name.endswith(".rs"):
@@ -132,13 +150,13 @@ for row in "${EXEMPTIONS[@]}"; do
   echo "exempt: $test (${row#*|})"
 done
 
-mutate() { # file marker pattern replacement
+mutate() { # file marker pattern replacement -> the 1-based line it changed
   python3 -I - "$work/$1" "$2" "$3" "$4" <<'PY'
 import re, sys
 path, marker, pattern, replacement = sys.argv[1:]
 lines = open(path).read().split("\n")
 tag = f"ATTACK({marker})"
-changed = 0
+first = None
 for i, line in enumerate(lines):
     if tag not in line:
         continue
@@ -147,19 +165,43 @@ for i, line in enumerate(lines):
         new = re.sub(pattern, replacement, lines[target], count=1)
         if new != lines[target]:
             lines[target] = new
-            changed += 1
+            if first is None:
+                first = target
             break
-if not changed:
+if first is None:
     sys.exit(f"the mutation for {marker} changed nothing")
 open(path, "w").write("\n".join(lines))
+print(first + 1)
 PY
+}
+
+# bounded <seconds> <cmd...>: run cmd under a watchdog so a hung mutant cannot
+# park the proof. GNU timeout where present (its child runs in a new group and
+# the whole group is signalled); elsewhere set -m gives the job its own group
+# for the same effect.
+bounded() {
+  local limit=$1; shift
+  if command -v timeout >/dev/null 2>&1; then
+    timeout "$limit" "$@"
+    return
+  fi
+  set -m
+  "$@" &
+  local pid=$!
+  ( sleep "$limit"; kill -KILL "-$pid" 2>/dev/null ) &
+  local dog=$!
+  wait "$pid" 2>/dev/null
+  local rc=$?
+  kill "$dog" 2>/dev/null; wait "$dog" 2>/dev/null
+  set +m
+  return "$rc"
 }
 
 # Baseline: every test the table names must pass on the unmutated tree, or a
 # later failure is a test that was already red - not the mutation's work.
 for package in $(printf '%s\n' "${mutations[@]}" | cut -d'|' -f4 | sort -u); do
   echo "baseline: $package tests on the unmutated tree"
-  if ! (cd "$work" && cargo test --locked -q -p "$package" --tests); then
+  if ! (cd "$work" && bounded 1200 cargo test --locked -q -p "$package" --tests); then
     echo "error: baseline failed - the unmutated suite is already red" >&2
     exit 1
   fi
@@ -168,34 +210,65 @@ done
 failures=0
 ran=0
 results=()
-declare -a proven_runs
 for row in "${mutations[@]}"; do
   IFS='|' read -r name file subst package target test <<<"$row"
   [ -n "${PROVE_ONLY:-}" ] && [ "$PROVE_ONLY" != "$name" ] && continue
   ran=$((ran + 1))
   pattern="${subst%%$'\t'*}"
   replacement="${subst#*$'\t'}"
-  key="$name|$file|$subst"
-  # A marker mutation already applied this round must be reapplied per row only when the
-  # file was restored; rows sharing a marker each get their own run.
-  cp "$here/$file" "$work/$file"
-  mutate "$file" "$name" "$pattern" "$replacement"
   if [ "$target" = lib ]; then selector=(--lib); else selector=(--test "$target"); fi
+  # Restore from the pristine copy of the commit — never the live tree, which a
+  # mid-run edit could have changed since the baseline.
+  cp "$pristine/$file" "$work/$file"
+  mutated_line="$(mutate "$file" "$name" "$pattern" "$replacement")"
+  # The kill must land on the protection's own decisive evidence: a panic
+  # mutant's mutated line, or the named test file for an assertion mutant —
+  # never a boot failure or a panic in a shared helper.
+  case "$replacement" in
+    *.unwrap\(\)*|*panic!*) pin="$(basename -- "$file"):$mutated_line:" ;;
+    *) pin="" ;;
+  esac
   started=$(date +%s)
   set +e
-  output="$(cd "$work" && cargo test --locked -q -p "$package" "${selector[@]}" -- --exact "$test" 2>&1)"
+  output="$(cd "$work" && bounded 900 cargo test --locked -q -p "$package" "${selector[@]}" -- --exact "$test" 2>&1)"
   status=$?
   set -e
   seconds=$(( $(date +%s) - started ))
+  named=0
+  kills=0
   if [ "$status" -ne 0 ] && grep -q 'test result: FAILED' <<<"$output" \
       && grep -qE "${test} [-.]+ FAILED" <<<"$output"; then
-    verdict=proven
-    cp "$here/$file" "$work/$file"
-    printf '  proven   %-24s %s fails without it (%ss)\n' "$name" "$test" "$seconds"
+    named=1
+    if [ -n "$pin" ]; then
+      grep -qF "panicked at ${pin}" <<<"$output" \
+        || grep -qF "panicked at tests/$target.rs:" <<<"$output" && kills=1
+    else
+      grep -qF "panicked at tests/$target.rs:" <<<"$output" && kills=1
+    fi
+  fi
+  cp "$pristine/$file" "$work/$file"
+  if [ "$kills" -eq 1 ]; then
+    # A flake during the mutant run is not a kill: the same test must pass
+    # again on the restored file.
+    set +e
+    green="$(cd "$work" && bounded 900 cargo test --locked -q -p "$package" "${selector[@]}" -- --exact "$test" 2>&1)"
+    green_status=$?
+    set -e
+    if [ "$green_status" -eq 0 ]; then
+      verdict=proven
+      printf '  proven   %-24s %s fails without it (%ss)\n' "$name" "$test" "$seconds"
+    else
+      verdict=flaky
+      failures=$((failures + 1))
+      printf '  FLAKY    %-24s stayed red on the restored tree - the kill may have been a flake:\n%s\n' "$name" "$(tail -8 <<<"$green")"
+    fi
   else
-    diff "$here/$file" "$work/$file" | head -20 >&2 || true
-    cp "$here/$file" "$work/$file"
-    if [ "$status" -ne 0 ]; then
+    diff "$pristine/$file" "$work/$file" | head -20 >&2 || true
+    if [ "$named" -eq 1 ]; then
+      verdict=inconclusive
+      failures=$((failures + 1))
+      printf '  INCONCLUSIVE %-22s failed, but not on the decisive line:\n%s\n' "$name" "$(tail -12 <<<"$output")"
+    elif [ "$status" -ne 0 ]; then
       verdict=broken
       failures=$((failures + 1))
       printf '  BROKEN   %-24s the mutation did not build or the test did not run:\n%s\n' "$name" "$(tail -20 <<<"$output")"
@@ -209,7 +282,6 @@ for row in "${mutations[@]}"; do
 done
 
 if [ -n "$out" ]; then
-  commit="$(git rev-parse HEAD 2>/dev/null || echo unknown)"
   dirty=false; git diff --quiet HEAD -- . 2>/dev/null || dirty=true
   load="$(uptime | sed 's/.*load averages*: *//')"
   printf '{"proof":"attacks","commit":"%s","tree_dirty":%s,"load_average":"%s","os":"%s","results":[%s]}\n' \

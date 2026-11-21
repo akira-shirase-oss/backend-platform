@@ -1,0 +1,5 @@
+# <product> <low>-<high> — one contiguous port band per product on this machine,
+# every band above Linux's ephemeral range (which ends at 60999). A copy of the
+# starter template reserves its band here: scripts/copy-template.sh refuses a
+# band that overlaps an entry and appends the new product's reservation itself.
+backend-platform 61400-61499

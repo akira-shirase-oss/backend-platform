@@ -396,9 +396,11 @@ starting values; changing one needs a measurement and a new entry.
 - **D-037 — The template is its own workspace, copied by a script.** `template/` is a
   complete Cargo workspace with its own lockfile, toolchain pin, gate (`scripts/check.sh`),
   CI file and Dependabot file, so a copy is a working repository the moment it is copied.
-  Its crates are named `starter-*`; `scripts/copy-template.sh DEST NAME` copies it and
+  Its crates are named `starter-*`; `scripts/copy-template.sh DEST NAME BAND` copies it and
   renames the crates, the operator tool, the `STARTER_` variables, the database roles, the
-  unit and the paths, and writes `TEMPLATE_ORIGIN` with the source commit. `--verify` builds
+  unit and the paths, writes the copy's `scripts/port-band` from BAND and reserves the band
+  in this repository's `port-bands` registry (overlap — the platform's own included — is
+  refused), and writes `TEMPLATE_ORIGIN` with the source commit. `--verify` builds
   the copy, runs clippy and its tests, and fails on any template name left; CI runs it on
   every push (`template-copy`). This repository's gate and CI run the template's gate as
   well (jobs `template` and `template-limits`). Template changes reach a copy only as a

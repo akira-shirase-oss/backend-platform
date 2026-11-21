@@ -17,13 +17,13 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 
-use axum::Router;
 use serde_json::{Value, json};
 use starter_accounts::mail::SmtpRelay;
 use starter_accounts::testing::SmtpSink;
 use starter_accounts::{Accounts, Settings, store, tokens};
 use starter_db::testing::TestDb;
-use starter_http::stack::{self, ErrorWindow, StackLimits};
+use starter_http::stack::{ErrorWindow, StackLimits};
+use starter_server::health::Health;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::task::JoinHandle;
@@ -143,11 +143,23 @@ pub async fn spawn_with(tune: impl FnOnce(&mut (Settings, StackLimits))) -> Inst
     )
     .await
     .unwrap();
-    // The real /v1 composition — the kit plus the product sample under the same
-    // guards — so product routes take the attack inputs too. 64 mirrors
-    // STARTER_MAX_IN_FLIGHT's documented default.
-    let app = Router::new().nest("/v1", starter_server::v1(accounts.clone(), 64));
-    let app = stack::apply(app, limits, Arc::new(ErrorWindow::default()));
+    // The real production composition — starter_server::app with the health
+    // routes and every app-level layer — so guards applied outside /v1 take the
+    // attack inputs too. 64 mirrors STARTER_MAX_IN_FLIGHT's documented default.
+    let errors = Arc::new(ErrorWindow::default());
+    let app = starter_server::app(starter_server::AppState {
+        accounts: accounts.clone(),
+        health: Health::new(
+            db.pool.clone(),
+            Duration::from_millis(500),
+            errors.clone(),
+            50,
+            20,
+        ),
+        errors,
+        stack: limits,
+        max_in_flight: 64,
+    });
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     let server = tokio::spawn(async move {
@@ -185,12 +197,20 @@ pub async fn spawn_serve() -> Instance {
     )
     .await
     .unwrap();
-    let app = Router::new().nest("/v1", starter_server::v1(accounts.clone(), 64));
-    let app = stack::apply(
-        app,
-        StackLimits::default(),
-        Arc::new(ErrorWindow::default()),
-    );
+    let errors = Arc::new(ErrorWindow::default());
+    let app = starter_server::app(starter_server::AppState {
+        accounts: accounts.clone(),
+        health: Health::new(
+            db.pool.clone(),
+            Duration::from_millis(500),
+            errors.clone(),
+            50,
+            20,
+        ),
+        errors,
+        stack: StackLimits::default(),
+        max_in_flight: 64,
+    });
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     let server = tokio::spawn(async move {

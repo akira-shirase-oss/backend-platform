@@ -75,7 +75,17 @@ STARTER_DATABASE_URL="$(role_url starter_app "$APP_PW" "$db")" STARTER_LISTEN="1
   STARTER_LOG=warn STARTER_MAX_IN_FLIGHT="${MAX_IN_FLIGHT:-256}" target/release/starter-server >"$work/server.log" 2>&1 &
 server=$!
 pids+=($server)
-for _ in $(seq 1 120); do curl -fsS -o /dev/null "$base/readyz" 2>/dev/null && break; sleep 0.25; done
+for _ in $(seq 1 120); do
+  curl -fsS -o /dev/null "$base/readyz" 2>/dev/null && break
+  # If the child died — the port was already another product's, say — readyz
+  # would keep answering from THAT product and k6 would load-test a stranger.
+  kill -0 "$server" 2>/dev/null || {
+    echo "error: the server died before becoming ready; its log follows" >&2
+    tail -20 "$work/server.log" >&2
+    exit 1
+  }
+  sleep 0.25
+done
 curl -fsS -o /dev/null "$base/readyz"
 
 api() { curl -sS --max-time 10 -X "$1" -b "$work/cookies" -c "$work/cookies" -H 'content-type: application/json' ${3:+--data "$3"} "$base$2"; }

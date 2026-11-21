@@ -209,19 +209,21 @@ impl Source for BTreeMap<&str, &str> {
     }
 }
 
-/// Exactly `scheme://host[:port]` (`scheme` is `http` or `https`), or None.
-/// The host may be a name, an IPv4 literal or a `[bracketed]` IPv6 literal;
-/// userinfo, a path, a query or a fragment are refused — see the
-/// `STARTER_PUBLIC_URL` check for why either is dangerous.
+/// Exactly `scheme://host[:port]` (`scheme` is `http` or `https`), or None —
+/// and only what a browser's `Origin` can carry: lowercase ASCII host without
+/// empty labels, no userinfo, path, query or fragment, and no explicit default
+/// port (a browser serialises `https://x:443` as `https://x`, so accepting the
+/// form would make the CSRF comparison miss every legitimate POST).
 fn origin_host_port(url: &str) -> Option<(String, Option<u16>)> {
-    let rest = url
+    let (scheme, rest) = url
         .strip_prefix("https://")
-        .or_else(|| url.strip_prefix("http://"))?;
+        .map(|r| ("https", r))
+        .or_else(|| url.strip_prefix("http://").map(|r| ("http", r)))?;
     if rest.is_empty()
+        || !rest.is_ascii()
         || rest
             .bytes()
-            .any(|b| matches!(b, b'/' | b'?' | b'#' | b'@' | b'\\'))
-        || rest.chars().any(char::is_whitespace)
+            .any(|b| matches!(b, b'/' | b'?' | b'#' | b'@' | b'\\') || !(0x21..=0x7e).contains(&b))
     {
         return None;
     }
@@ -239,12 +241,25 @@ fn origin_host_port(url: &str) -> Option<(String, Option<u16>)> {
             None => (rest, None),
         },
     };
-    if host.is_empty() {
+    // A leading/trailing/empty label, an uppercase byte or an empty host is
+    // DNS-legal but never an Origin — fail closed rather than normalise.
+    if host.is_empty()
+        || host.split('.').any(str::is_empty)
+        || host.bytes().any(|b| b.is_ascii_uppercase())
+    {
         return None;
     }
     match port {
         None => Some((host.to_owned(), None)),
-        Some(p) => Some((host.to_owned(), Some(p.parse::<u16>().ok()?))),
+        Some(p) => {
+            if !p.bytes().all(|b| b.is_ascii_digit()) {
+                return None;
+            }
+            match (scheme, p.parse::<u16>().ok()?) {
+                ("https", 443) | ("http", 80) => None,
+                (_, port) => Some((host.to_owned(), Some(port))),
+            }
+        }
     }
 }
 
@@ -594,6 +609,15 @@ mod tests {
             ("http://app.example.com", false),
             ("http://203.0.113.10", false),
             ("http://user@203.0.113.10", false),
+            ("https://user@app.example.com", false),
+            // Origin forms a browser never emits are refused, not normalised.
+            ("https://APP.EXAMPLE.COM", false),
+            ("https://app.example.com.", false),
+            ("https://app.example.com:443", false),
+            ("http://127.0.0.1:80", false),
+            ("http://localhost:+8080", false),
+            ("http://127.0.0.1\u{1}:8080", false),
+            ("https://app.example.com:8443", true),
         ] {
             let source = BTreeMap::from([
                 (

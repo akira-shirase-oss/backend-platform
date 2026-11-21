@@ -59,11 +59,11 @@ async fn note(
     ))
 }
 
-/// `/v1`: the kit's routes merged with the product's, all inside the CSRF origin
-/// guard and the in-flight shed gate. A copy merges its routes into `product` —
-/// `route_layer` here covers them, which a `.layer` inside `router()` cannot (it
-/// wraps only the routes present when it is added).
-pub fn v1(accounts: Accounts, max_in_flight: usize) -> Router {
+/// `/v1`: the kit's routes merged with the product's, all inside the in-flight shed
+/// gate. A copy merges its routes into `product` — `route_layer` here covers them,
+/// which a `.layer` inside `router()` cannot (it wraps only the routes present when
+/// it is added). The CSRF guard is not layered here: it wraps the whole app below.
+pub fn v1(accounts: &Accounts, max_in_flight: usize) -> Router {
     let product = Router::new()
         .route("/workspaces/{workspace}/hello", get(hello))
         .route("/workspaces/{workspace}/note", post(note))
@@ -73,10 +73,6 @@ pub fn v1(accounts: Accounts, max_in_flight: usize) -> Router {
         .route_layer(axum::middleware::from_fn_with_state(
             stack::gate(max_in_flight),
             stack::shed,
-        ))
-        .route_layer(axum::middleware::from_fn_with_state(
-            accounts,
-            starter_accounts::csrf_guard,
         ))
 }
 
@@ -89,7 +85,14 @@ pub fn app(state: AppState) -> Router {
         .route("/errorz", get(health::errorz))
         .with_state(state.health.clone());
     let router = Router::new()
-        .nest("/v1", v1(state.accounts.clone(), state.max_in_flight))
+        .nest("/v1", v1(&state.accounts, state.max_in_flight))
         .merge(health);
+    let csrf =
+        axum::middleware::from_fn_with_state(state.accounts.clone(), starter_accounts::csrf_guard);
+    // The CSRF origin guard is a `.layer` over the complete app — the fallback
+    // and any route a copy adds beside `v1` are covered too, where a `route_layer`
+    // inside `v1` reaches only the routes present when it is added.
+    // ATTACK(csrf-v1)
+    let router = router.layer(csrf);
     stack::apply(router, state.stack, state.errors)
 }

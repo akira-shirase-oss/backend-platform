@@ -14,10 +14,15 @@ cd "$(dirname "$0")/.."
 work=target/test-copy-names
 rm -rf "$work"
 mkdir -p "$work"
+# The copies are throwaway: reserve their bands in a scratch registry, not the real one.
+printf 'backend-platform 61400-61499\n' >"$work/port-bands"
+export PORT_BANDS_FILE="$PWD/$work/port-bands"
 
+band=62000
 for name in ab abcdefghijklmnop; do
   dest="$PWD/$work/$name"
-  scripts/copy-template.sh "$dest" "$name" >/dev/null
+  scripts/copy-template.sh "$dest" "$name" "$band-$((band + 99))" >/dev/null
+  band=$((band + 100))
   (
     cd "$dest"
     unset CARGO_TARGET_DIR

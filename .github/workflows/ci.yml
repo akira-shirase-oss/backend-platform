@@ -249,7 +249,7 @@ jobs:
       - name: Copy as "copytest" and verify
         run: |
           eval "$(template/scripts/stack.sh env)"
-          scripts/copy-template.sh "$RUNNER_TEMP/copytest" copytest --verify
+          scripts/copy-template.sh "$RUNNER_TEMP/copytest" copytest 61700-61799 --verify
 
   # The production path, end to end: the operator guide's install, check, upgrade and
   # rollback blocks run as written on an Ubuntu 24.04 VM with systemd
