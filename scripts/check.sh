@@ -13,6 +13,12 @@ cargo fmt --all -- --check
 cargo clippy --workspace --all-targets --locked -- -D warnings
 cargo clippy -p platform-worker --features fault-injection --all-targets --locked -- -D warnings
 
+# cargo tree reads dependency manifests: fetch the locked set for the real build targets
+# (the architecture check no longer asks for `all`, so wasm-only deps are never needed).
+cargo fetch --locked --quiet \
+  --target aarch64-apple-darwin \
+  --target x86_64-unknown-linux-gnu \
+  --target x86_64-pc-windows-msvc
 scripts/check-architecture.sh
 # Each rule must be able to fail.
 expect_failure() {

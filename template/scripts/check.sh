@@ -32,6 +32,12 @@ step "every script explains itself (--help) and refuses unknown arguments"
 scripts/test-help.sh
 
 step "architecture, and that each rule can fail"
+# cargo tree reads dependency manifests: fetch the locked set for the real build targets
+# (the check no longer asks for `all`, so wasm-only deps are never needed).
+cargo fetch --locked --quiet \
+  --target aarch64-apple-darwin \
+  --target x86_64-unknown-linux-gnu \
+  --target x86_64-pc-windows-msvc
 scripts/check-architecture.sh
 expect_failure() {
   if env "$@" scripts/check-architecture.sh >/dev/null 2>&1; then

@@ -24,8 +24,15 @@ http_banned="${ARCH_HTTP_BANNED:-sqlx sqlx-core sqlx-postgres starter-db}"
 domain_pattern="${ARCH_DOMAIN_PATTERN:-std::(fs|net|process|env|thread)|tokio|sqlx|SystemTime|Instant::now|println!|eprintln!}"
 shipped_feature="${ARCH_SHIPPED_FEATURE:-test-support}"
 
+# The real build targets, not `all`: an `all` tree also reads the manifests of
+# wasm-only deps, which are never fetched and can be unavailable. A dep planted
+# behind another cfg triple (cfg(unix), cfg(wasm32)) is not covered.
+targets="aarch64-apple-darwin x86_64-unknown-linux-gnu x86_64-pc-windows-msvc"
+
 fail=0
-tree=$(cargo tree $mode -p starter-http -e normal,build --all-features --target all --prefix none --format '{p}' | awk '{print $1}' | sort -u)
+tree=$(for t in $targets; do
+  cargo tree $mode -p starter-http -e normal,build --all-features --target "$t" --prefix none --format '{p}'
+done | awk '{print $1}' | sort -u)
 for name in $http_banned; do
   if grep -qx -- "$name" <<<"$tree"; then
     echo "error: starter-http must not depend on $name" >&2
@@ -37,8 +44,10 @@ if grep -nE -- "$domain_pattern" crates/starter-accounts/src/domain.rs >/dev/nul
   grep -nE -- "$domain_pattern" crates/starter-accounts/src/domain.rs >&2 || true
   fail=1
 fi
-# The shipped build: normal edges only, default features, every target.
-features=$(cargo tree $mode -p starter-server -e features,normal --target all --prefix none --format '{p} {f}' 2>/dev/null)
+# The shipped build: normal edges only, default features, every real target.
+features=$(for t in $targets; do
+  cargo tree $mode -p starter-server -e features,normal --target "$t" --prefix none --format '{p} {f}'
+done 2>/dev/null)
 if grep -E "\"${shipped_feature}\"|[ ,]${shipped_feature}(,|$)" <<<"$features" >/dev/null; then
   echo "error: starter-server's shipped build enables the $shipped_feature feature" >&2
   fail=1

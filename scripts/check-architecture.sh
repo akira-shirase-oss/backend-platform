@@ -21,12 +21,16 @@ domain_banned="${ARCH_DOMAIN_BANNED:-tokio tokio-util axum hyper tower tower-htt
 domain_pattern="${ARCH_DOMAIN_PATTERN:-std::(fs|net|process|env|thread)|SystemTime|Instant::now|stdin\(|stdout\(|println!|eprintln!}"
 server_banned="${ARCH_SERVER_BANNED:-platform-adapters platform-fake-provider platform-worker reqwest}"
 
-# The resolved graph with every feature and every target (F3): an adapter hidden behind
-# `optional = true` + a feature, or under `[target.'cfg(..)'.dependencies]`, is still linked
-# in some build, so it counts.
+# The resolved graph with every feature and every real build target (F3): an adapter
+# hidden behind `optional = true` + a feature, or under `[target.'cfg(..)'.dependencies]`,
+# is still linked in some build, so it counts. The targets are the three real ones —
+# `all` would also demand the manifests of wasm-only deps (e.g. reqwest's
+# wasm-bindgen-futures), which are never fetched and can be unavailable; a dep planted
+# behind another cfg triple (cfg(unix), cfg(wasm32)) is not covered.
 tree_of() {
-  cargo tree $mode -p "$1" -e "$2" --all-features --target all --prefix none --format '{p}' \
-    | awk '{print $1}' | sort -u
+  for t in aarch64-apple-darwin x86_64-unknown-linux-gnu x86_64-pc-windows-msvc; do
+    cargo tree $mode -p "$1" -e "$2" --all-features --target "$t" --prefix none --format '{p}'
+  done | awk '{print $1}' | sort -u
 }
 
 fail=0
