@@ -40,6 +40,16 @@ async fn another_projects_state_is_not_visible() {
 async fn operation_ids_are_not_guessable() {
     let s = spawn().await;
     let client = reqwest::Client::new();
+    // A real operation must exist: a lookup widened to "any row" only leaks when
+    // the table is not empty — an empty table keeps every guess at 404 either way.
+    let put = client
+        .put(s.url("/v1/projects/alpha/desired"))
+        .bearer_auth(TOKEN)
+        .json(&json!({ "databases": ["main"] }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(put.status().as_u16(), 202);
     for _ in 0..16 {
         let guess = uuid::Uuid::now_v7();
         let r = authed(
