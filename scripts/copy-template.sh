@@ -36,7 +36,7 @@ upper = name.upper()
 rules = [
     # (?<![A-Za-z0-9]) rather than \b: an underscore before the name (CARGO_BIN_EXE_...)
     # is a word character, so \b would miss it.
-    (re.compile(r"(?<![A-Za-z0-9])starter(?=[-_](http|db|accounts|server)\b)"), name),
+    (re.compile(r"(?<![A-Za-z0-9])starter(?=[-_](http|db|accounts|server|attacks)\b)"), name),
     (re.compile(r"(?<![A-Za-z0-9])starterctl\b"), f"{name}ctl"),
     (re.compile(r"(?<![A-Z0-9])STARTER_"), f"{upper}_"),
     (re.compile(r"\bstarter_(owner|app|test_|probe_|drill_|rehearsal_|control_|session|digest_scratch|install|load_|dev)"), name + r"_\1"),

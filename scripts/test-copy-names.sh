@@ -24,7 +24,15 @@ for name in ab abcdefghijklmnop; do
     cargo fmt --all -- --check
     cargo clippy --workspace --all-targets --locked -q -- -D warnings
   )
-  echo "name ok at length ${#name}: fmt --check and clippy clean ($name)"
+  # The same leftover grep --verify runs: a rename rule that misses a template name
+  # (seen: starter-attacks) ships a copy that still links the template's crates.
+  left="$(grep -rIn --exclude-dir=target -E '(^|[^A-Za-z0-9])starter[-_]|(^|[^A-Z0-9])STARTER_|starterctl' "$dest" | grep -v TEMPLATE_ORIGIN || true)"
+  if [ -n "$left" ]; then
+    echo "error: names the rename missed:" >&2
+    echo "$left" >&2
+    exit 1
+  fi
+  echo "name ok at length ${#name}: fmt --check, clippy and the leftover grep clean ($name)"
 done
 rm -rf "$work"
 echo "copy-names ok: the template is fmt- and clippy-clean at NAME lengths 2 and 16"
