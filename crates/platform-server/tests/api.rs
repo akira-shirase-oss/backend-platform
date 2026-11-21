@@ -27,7 +27,7 @@ fn config() -> Config {
 
 fn router(db: &TestDb) -> Router {
     let config = config();
-    app(&config, AppState::new(&config, db.pool.clone()))
+    app(&config, AppState::new(&config, db.pool.clone()).unwrap())
 }
 
 async fn call(
@@ -284,7 +284,7 @@ async fn a_dead_control_database_is_reported_honestly() {
     let dead =
         platform_db::connect_lazy("postgres://platform:x@127.0.0.1:1/platform", &settings).unwrap();
     let config = config();
-    let r = app(&config, AppState::new(&config, dead));
+    let r = app(&config, AppState::new(&config, dead).unwrap());
     let started = std::time::Instant::now();
     let (status, _, body) = call(&r, "GET", "/v1/projects/shop", None, &[]).await;
     assert_eq!(
@@ -303,6 +303,32 @@ async fn a_dead_control_database_is_reported_honestly() {
         "refusals are fast: {:?}",
         started.elapsed()
     );
+}
+
+/// An empty or too-short admin token is refused at AppState::new (the review's item 9):
+/// a config that skipped from_env validation must not produce a state that
+/// authenticates `Bearer ` — anything or nothing — as admin.
+#[tokio::test]
+async fn an_empty_or_short_admin_token_is_refused() {
+    let settings = platform_db::PoolSettings::default();
+    let dead =
+        platform_db::connect_lazy("postgres://platform:x@127.0.0.1:1/platform", &settings).unwrap();
+    for token in ["", "short", "0123456789012345678901234567890"] {
+        let config = Config {
+            admin_token: Secret::new(token.to_owned()),
+            ..Config::default()
+        };
+        assert!(
+            AppState::new(&config, dead.clone()).is_err(),
+            "a {len}-byte token must be refused",
+            len = token.len()
+        );
+    }
+    let config = Config {
+        admin_token: Secret::new(TOKEN.to_owned()),
+        ..Config::default()
+    };
+    assert!(AppState::new(&config, dead).is_ok());
 }
 
 /// No secret reaches the server's logs (D-015, F11): the admin token, database passwords
@@ -354,7 +380,7 @@ async fn no_secret_reaches_the_server_logs() {
     )
     .unwrap();
     let config = config();
-    let dead_router = app(&config, AppState::new(&config, dead));
+    let dead_router = app(&config, AppState::new(&config, dead).unwrap());
     let (status, _, _) = call(&dead_router, "GET", "/v1/projects/shop", None, &[]).await;
     assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
     let text = logs.text();

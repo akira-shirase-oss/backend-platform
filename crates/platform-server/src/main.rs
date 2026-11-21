@@ -38,7 +38,10 @@ async fn main() -> anyhow::Result<()> {
         .await
         .with_context(|| format!("binding {}", config.listen))?;
     let local = listener.local_addr().context("reading the bound address")?;
-    let router = app(&config, AppState::new(&config, db.clone()));
+    let router = app(
+        &config,
+        AppState::new(&config, db.clone()).map_err(|e| anyhow::anyhow!(e))?,
+    );
     tracing::info!(%local, "listening");
     let outcome = shutdown::serve(listener, router, config.shutdown_grace, async move {
         let name = signal.await;

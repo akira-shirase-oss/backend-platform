@@ -38,7 +38,7 @@ async fn a_full_server_sheds_at_once_with_503_overloaded() {
     };
     let dead =
         platform_db::connect_lazy("postgres://platform:x@127.0.0.1:1/platform", &settings).unwrap();
-    let state = AppState::new(&config, dead);
+    let state = AppState::new(&config, dead).unwrap();
     let held = state
         .gate
         .clone()

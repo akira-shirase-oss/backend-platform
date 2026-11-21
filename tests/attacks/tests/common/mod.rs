@@ -69,7 +69,7 @@ pub async fn spawn() -> Instance {
 /// Spawns with a tuned configuration (smaller limits, longer timeouts).
 pub async fn spawn_with(config: Config) -> Instance {
     let db = TestDb::new().await;
-    let app = platform_server::app(&config, AppState::new(&config, db.pool.clone()));
+    let app = platform_server::app(&config, AppState::new(&config, db.pool.clone()).unwrap());
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     let server = tokio::spawn(async move {

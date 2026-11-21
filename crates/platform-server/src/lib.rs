@@ -36,13 +36,21 @@ pub struct AppState {
 }
 
 impl AppState {
-    /// Builds the state.
-    pub fn new(config: &Config, db: PgPool) -> Self {
-        Self {
+    /// Builds the state, refusing an empty or too-short admin token even when the
+    /// config came from a path that skipped `Config::from_env` validation (an
+    /// unauthenticated admin is worse than a failed start).
+    pub fn new(config: &Config, db: PgPool) -> Result<Self, String> {
+        if config.admin_token.expose().len() < config::MIN_ADMIN_TOKEN_LEN {
+            return Err(format!(
+                "the admin token is required: at least {} bytes",
+                config::MIN_ADMIN_TOKEN_LEN
+            ));
+        }
+        Ok(Self {
             db,
             admin_token: Arc::new(config.admin_token.clone()),
             gate: Arc::new(Semaphore::new(config.max_in_flight)),
-        }
+        })
     }
 }
 

@@ -391,6 +391,27 @@ impl Config {
             p.0.push(
                 "STARTER_PUBLIC_URL must be an http(s) origin without a trailing slash".to_owned(),
             );
+        } else if let Some(rest) = public_url.strip_prefix("http://") {
+            // Plain http is development-only: a non-loopback origin leaks links, cookies
+            // and tokens — refuse it unless the host is loopback.
+            let authority = rest.split('/').next().unwrap_or("");
+            let authority = authority.rsplit('@').next().unwrap_or("");
+            let host = match authority.strip_prefix('[') {
+                Some(inner) => inner.split(']').next().unwrap_or(""),
+                None => authority.split(':').next().unwrap_or(""),
+            };
+            let loopback = host == "localhost"
+                || host == "::1"
+                || host
+                    .parse::<std::net::Ipv4Addr>()
+                    .map(|ip| ip.is_loopback())
+                    .unwrap_or(false);
+            if !loopback {
+                p.0.push(
+                    "STARTER_PUBLIC_URL must be https unless it points at a loopback host"
+                        .to_owned(),
+                );
+            }
         }
         let mail_from = source
             .var("STARTER_MAIL_FROM")
@@ -524,6 +545,30 @@ mod tests {
             );
         }
         assert!(problems.iter().all(|p| !p.contains("pw@")));
+    }
+
+    #[test]
+    fn a_plain_http_public_url_is_only_allowed_on_loopback() {
+        for (url, ok) in [
+            ("http://127.0.0.1:61450", true),
+            ("http://localhost:8080", true),
+            ("http://[::1]:8080", true),
+            ("https://app.example.com", true),
+            ("http://app.example.com", false),
+            ("http://203.0.113.10", false),
+            ("http://user@203.0.113.10", false),
+        ] {
+            let source = BTreeMap::from([
+                ("STARTER_DATABASE_URL", "postgres://u:pw@127.0.0.1:61432/app"),
+                ("STARTER_PUBLIC_URL", url),
+            ]);
+            assert_eq!(
+                Config::load(&source).is_ok(),
+                ok,
+                "{url} must be {}",
+                if ok { "accepted" } else { "refused" }
+            );
+        }
     }
 
     #[test]
