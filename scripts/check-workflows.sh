@@ -43,6 +43,10 @@ for path in sys.argv[1:]:
             if indent > scalar_at:
                 continue
             scalar_at = None
+        if "\t" in line[: indent + 1]:
+            print(f"error: {path}:{n}: a tab in indentation is invalid YAML", file=sys.stderr)
+            bad = 1
+            continue
         m = KEY.match(line)
         if not m:
             continue
@@ -63,10 +67,11 @@ for path in sys.argv[1:]:
             print(f"error: {path}:{n}: duplicate key '{key}' in the same mapping", file=sys.stderr)
             bad = 1
         keys.add(key)
-        # A `key: |`/`>` opens a block scalar: following lines deeper than the key's
-        # indent are content, not keys.
+        # A `key: |`/`>` opens a block scalar: following lines deeper than the KEY'S
+        # level are content, not keys — the dash column would also swallow a sibling
+        # key like `shell:` under `- run: |`.
         if SCALAR.match(line.split(":", 1)[1]):
-            scalar_at = indent
+            scalar_at = ni
 if bad:
     sys.exit(1)
 print(f"workflows ok: {len(sys.argv) - 1} file(s) parse with no duplicate keys")

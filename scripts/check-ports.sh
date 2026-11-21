@@ -34,20 +34,38 @@ for file in "${files[@]}"; do
   [ -f "$file" ] || continue
   scanned=$((scanned + 1))
 
-  # 127.0.0.1:NNNN / localhost:NNNN literals (two digits or more; :0 is ephemeral).
+  # HOST:NNNN literals (two digits or more; :0 is ephemeral) — loopback, a wildcard
+  # bind, and the host side of a three-part mapping like 0.0.0.0:NNNN:MMMM.
   while IFS= read -r hit; do
     [ -n "$hit" ] || continue
     line="${hit%%:*}" port="${hit##*:}"
     in_band "$port" || report "$line" "$port" "$(sed -n "${line}p" "$file")"
-  done < <(grep -nEo '(127\.0\.0\.1|localhost):[0-9]{2,5}' "$file" || true)
+  done < <(grep -nEo '(127\.0\.0\.1|localhost|0\.0\.0\.0|\[::\]):[0-9]{2,5}' "$file" || true)
 
-  # A port mapping: - "NNNN:MMMM" — the host side. The 127.0.0.1:NNNN:MMMM form is caught
-  # by the loopback rule.
+  # A port mapping: - "NNNN:MMMM" — the host side. No end anchor, so a trailing comment
+  # or a flow-sequence comma can't hide it; a host-prefixed three-part mapping is caught
+  # by the literal rule above.
   while IFS= read -r line; do
     [ -n "$line" ] || continue
     port="$(sed -n "${line}p" "$file" | sed -nE 's/^[[:space:]]*-[[:space:]]*"?([0-9]{2,5}):.*/\1/p')"
     in_band "$port" || report "$line" "$port" "$(sed -n "${line}p" "$file")"
-  done < <(grep -nE '^[[:space:]]*-[[:space:]]*"?[0-9]{2,5}:[0-9]+"?[[:space:]]*$' "$file" | cut -d: -f1 || true)
+  done < <(grep -nE '^[[:space:]]*-[[:space:]]*"?[0-9]{2,5}:[0-9]+' "$file" | cut -d: -f1 || true)
+
+  # A quoted mapping anywhere — the flow form `ports: ["NNNN:MMMM", ...]`.
+  while IFS= read -r hit; do
+    [ -n "$hit" ] || continue
+    line="${hit%%:*}" port="${hit#*:}"
+    port="${port#\"}"; port="${port%%:*}"
+    in_band "$port" || report "$line" "$port" "$(sed -n "${line}p" "$file")"
+  done < <(grep -nEo '"[0-9]{2,5}:[0-9]+"' "$file" || true)
+
+  # The compose long form: `published: NNNN` is the host port.
+  while IFS= read -r hit; do
+    [ -n "$hit" ] || continue
+    line="${hit%%:*}" port="${hit##*:}"
+    port="${port##*[!0-9]}"
+    in_band "$port" || report "$line" "$port" "$(sed -n "${line}p" "$file")"
+  done < <(grep -nEio 'published:[[:space:]]*"?[0-9]{2,5}' "$file" || true)
 
   # A *PORT variable's default: ${...PORT...:-NNNN}.
   while IFS= read -r hit; do
