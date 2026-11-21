@@ -27,33 +27,166 @@ async fn a_workspace_is_invisible_to_a_non_member() {
     assert_eq!(created.status().as_u16(), 201);
     let workspace = body_json(created).await["id"].as_str().unwrap().to_owned();
 
-    // Every read/write of it under Bob's session is refused — and the envelope must
-    // not confirm the workspace exists.
-    for (method, path) in [
-        ("GET", format!("/v1/workspaces/{workspace}")),
-        ("DELETE", format!("/v1/workspaces/{workspace}")),
-        ("GET", format!("/v1/workspaces/{workspace}/members")),
-        ("POST", format!("/v1/workspaces/{workspace}/members")),
-        ("GET", format!("/v1/workspaces/{workspace}/tokens")),
-        ("POST", format!("/v1/workspaces/{workspace}/tokens")),
+    // Every read/write of it under Bob's session is refused. Bodies are valid so the
+    // refusal asserted is the access check, not JSON validation — and access failures
+    // are exactly 404 + not_found so nothing confirms the workspace exists.
+    for (method, path, body) in [
+        ("GET", format!("/v1/workspaces/{workspace}"), None),
+        ("DELETE", format!("/v1/workspaces/{workspace}"), None),
+        ("GET", format!("/v1/workspaces/{workspace}/members"), None),
+        (
+            "POST",
+            format!("/v1/workspaces/{workspace}/members"),
+            Some(json!({ "email": "mallory@example.test", "role": "member" })),
+        ),
+        ("GET", format!("/v1/workspaces/{workspace}/tokens"), None),
+        (
+            "POST",
+            format!("/v1/workspaces/{workspace}/tokens"),
+            Some(json!({ "name": "ci" })),
+        ),
     ] {
-        let r = client
+        let mut req = client
             .request(method.parse::<reqwest::Method>().unwrap(), s.url(&path))
-            .header("cookie", format!("starter_session={bob}"))
-            .json(&json!({ "name": "n", "user": uuid::Uuid::now_v7() }))
+            .header("cookie", format!("starter_session={bob}"));
+        if let Some(body) = body {
+            req = req.json(&body);
+        }
+        let r = req.send().await.unwrap();
+        assert_eq!(r.status().as_u16(), 404, "{method} {path}");
+        assert_eq!(
+            body_json(r).await["error"]["code"],
+            "not_found",
+            "{method} {path}"
+        );
+    }
+
+    // Re-read as the owner: the attempted writes and deletes changed nothing.
+    let r = client
+        .get(s.url(&format!("/v1/workspaces/{workspace}")))
+        .header("cookie", format!("starter_session={alice}"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status().as_u16(), 200);
+    assert_eq!(body_json(r).await["name"].as_str().unwrap(), "Alice's shop");
+    for path in ["members", "tokens"] {
+        let r = client
+            .get(s.url(&format!("/v1/workspaces/{workspace}/{path}")))
+            .header("cookie", format!("starter_session={alice}"))
             .send()
             .await
             .unwrap();
-        let status = r.status().as_u16();
-        // Reads and deletes answer the access refusal; a POST whose body is invalid
-        // is refused at 422 before the access check — either way Bob is refused and
-        // the envelope confirms nothing about Alice's workspace.
-        if method == "POST" {
-            assert!((400..500).contains(&status), "{method} {path} → {status}");
-        } else {
-            assert!(status == 403 || status == 404, "{method} {path} → {status}");
-        }
+        assert_eq!(r.status().as_u16(), 200);
+        let list = body_json(r).await;
+        let entries = list.as_array().cloned().unwrap_or_else(|| {
+            list.get("members")
+                .or_else(|| list.get("tokens"))
+                .and_then(Value::as_array)
+                .cloned()
+                .unwrap_or_default()
+        });
+        assert_eq!(
+            entries.len(),
+            usize::from(path == "members"),
+            "{path}: {list}"
+        );
     }
+}
+
+#[tokio::test]
+async fn an_api_token_sees_only_its_own_workspace_and_only_reads() {
+    let s = spawn().await;
+    let client = reqwest::Client::new();
+    let alice = s.verified_session("alice@example.test").await;
+
+    // Alice owns two workspaces; a token minted on the first must not reach the second.
+    let workspace = |name: &'static str| {
+        let client = client.clone();
+        let url = s.url("/v1/workspaces");
+        let cookie = format!("starter_session={alice}");
+        async move {
+            let r = client
+                .post(url)
+                .header("cookie", cookie)
+                .json(&json!({ "name": name }))
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(r.status().as_u16(), 201);
+            body_json(r).await["id"].as_str().unwrap().to_owned()
+        }
+    };
+    let first = workspace("first").await;
+    let second = workspace("second").await;
+
+    let minted = client
+        .post(s.url(&format!("/v1/workspaces/{first}/tokens")))
+        .header("cookie", format!("starter_session={alice}"))
+        .json(&json!({ "name": "ci" }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(minted.status().as_u16(), 201);
+    let token = body_json(minted).await["token"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+
+    // The token reads the workspace it is scoped to; member and token lists need a
+    // session (403 session_required), and anything outside its own workspace is 404.
+    for (path, want) in [
+        (format!("/v1/workspaces/{first}"), 200),
+        (format!("/v1/workspaces/{first}/members"), 403),
+        (format!("/v1/workspaces/{first}/tokens"), 403),
+        (format!("/v1/workspaces/{second}"), 404),
+        (format!("/v1/workspaces/{second}/members"), 404),
+    ] {
+        let r = client
+            .get(s.url(&path))
+            .bearer_auth(&token)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(r.status().as_u16(), want, "token GET {path}");
+    }
+
+    // Writes are refused even in the token's own workspace: 403 session_required.
+    for (method, path, body) in [
+        (
+            "POST",
+            format!("/v1/workspaces/{first}/tokens"),
+            Some(json!({ "name": "x" })),
+        ),
+        (
+            "POST",
+            format!("/v1/workspaces/{first}/members"),
+            Some(json!({ "email": "m@example.test", "role": "member" })),
+        ),
+        ("DELETE", format!("/v1/workspaces/{first}"), None),
+    ] {
+        let mut req = client
+            .request(method.parse::<reqwest::Method>().unwrap(), s.url(&path))
+            .bearer_auth(&token);
+        if let Some(body) = body {
+            req = req.json(&body);
+        }
+        let r = req.send().await.unwrap();
+        assert_eq!(r.status().as_u16(), 403, "token {method} {path}");
+        assert_eq!(
+            body_json(r).await["error"]["code"],
+            "session_required",
+            "token {method} {path}"
+        );
+    }
+    // A token is never a session for account routes.
+    let r = client
+        .get(s.url("/v1/me"))
+        .bearer_auth(&token)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status().as_u16(), 403);
 }
 
 #[tokio::test]
