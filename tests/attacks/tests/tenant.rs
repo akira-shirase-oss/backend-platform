@@ -62,7 +62,8 @@ async fn operation_ids_are_not_guessable() {
 #[tokio::test]
 async fn path_traversal_and_encoding_tricks_are_refused() {
     let s = spawn().await;
-    let client = reqwest::Client::new();
+    // raw(): a client's URL parser normalises `..` and decodes `%2e` before the
+    // bytes leave, so the tricky path would never reach the server at all.
     let cases = [
         "/v1/projects/../projects/alpha",
         "/v1/projects/%2e%2e",
@@ -74,11 +75,17 @@ async fn path_traversal_and_encoding_tricks_are_refused() {
         "/v1/operations/../../../../etc/passwd",
     ];
     for path in cases {
-        let r = authed(&client, Method::GET, &s.url(path)).await;
-        let status = r.status().as_u16();
+        let response = common::raw(
+            &s,
+            format!("GET {path} HTTP/1.1\r\nHost: x\r\nAuthorization: Bearer {TOKEN}\r\nConnection: close\r\n\r\n").as_bytes(),
+            std::time::Duration::from_secs(5),
+        )
+        .await;
+        let status = common::raw_status(&response);
         assert!(
             status == 400 || status == 404 || status == 405,
-            "{path} → {status}"
+            "{path} → {status} (raw: {})",
+            response.lines().next().unwrap_or("")
         );
     }
 }

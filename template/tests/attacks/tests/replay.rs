@@ -96,7 +96,7 @@ async fn a_signed_out_session_is_dead() {
 async fn a_duplicate_signup_is_refused_without_disclosure() {
     let s = spawn().await;
     let client = reqwest::Client::new();
-    let _ = s.verified_session("dup@example.test").await;
+    let first_session = s.verified_session("dup@example.test").await;
     // A fresh invite + the same address: refused, and the envelope must not confirm
     // the account exists beyond the documented email_taken.
     let invite = s.invite().await;
@@ -109,15 +109,17 @@ async fn a_duplicate_signup_is_refused_without_disclosure() {
         .await
         .unwrap();
     assert!(r.status().is_client_error(), "duplicate signup accepted");
-    // The session cookie from the first account still works — replay did not corrupt it.
+    // The session cookie from the FIRST account still works — replay did not corrupt it.
     let me = client
         .get(s.url("/v1/me"))
-        .header(
-            "cookie",
-            format!("starter_session={}", s.verified_session("x@x.test").await),
-        )
+        .header("cookie", format!("starter_session={first_session}"))
         .send()
         .await
         .unwrap();
-    assert_eq!(me.status().as_u16(), 200);
+    assert_eq!(me.status().as_u16(), 200, "first account's session broken");
+    let body: serde_json::Value = me.json().await.unwrap();
+    assert_eq!(
+        body["email"], "dup@example.test",
+        "the session belongs to the first account, not a new one"
+    );
 }

@@ -116,12 +116,17 @@ async fn malformed_bodies_are_4xx_never_5xx() {
             );
         }
     }
-    // Unknown fields are refused, not ignored.
+    // Unknown fields are refused, not ignored — with a VALID invite, so the request
+    // reaches the body's own validation instead of dying at the invite check.
     let r = client
         .post(s.url("/v1/signup"))
-        .json(&json!({ "invite": "x", "email": "a@b.test", "password": common::PASSWORD, "admin": true }))
+        .json(&json!({ "invite": s.invite().await, "email": "a@b.test", "password": common::PASSWORD, "admin": true }))
         .send()
         .await
         .unwrap();
-    assert!(r.status().is_client_error());
+    assert_eq!(
+        r.status().as_u16(),
+        422,
+        "an unknown field passed validation"
+    );
 }
